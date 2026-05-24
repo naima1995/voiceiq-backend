@@ -3,23 +3,31 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
-// ─── MSAL Config ──────────────────────────────────────────────────────────
-const msalConfig = {
-  auth: {
-    clientId: process.env.AZURE_CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}`,
-    clientSecret: process.env.AZURE_CLIENT_SECRET,
-  }
-};
+// ─── MSAL Config (lazy init) ──────────────────────────────────────────────
+let msalClient = null;
 
-const msalClient = new ConfidentialClientApplication(msalConfig);
+function getMsalClient() {
+  if (!msalClient) {
+    if (!process.env.AZURE_CLIENT_SECRET || !process.env.AZURE_CLIENT_ID || !process.env.AZURE_TENANT_ID) {
+      throw new Error('Azure credentials not configured. Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET.');
+    }
+    msalClient = new ConfidentialClientApplication({
+      auth: {
+        clientId: process.env.AZURE_CLIENT_ID,
+        authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}`,
+        clientSecret: process.env.AZURE_CLIENT_SECRET,
+      }
+    });
+  }
+  return msalClient;
+}
 
 // Scopes needed for Teams calling via Graph API
 const CALLING_SCOPES = ['https://graph.microsoft.com/.default'];
 
 // ─── Get App Token ────────────────────────────────────────────────────────
 async function getAppToken() {
-  const result = await msalClient.acquireTokenByClientCredential({
+  const result = await getMsalClient().acquireTokenByClientCredential({
     scopes: CALLING_SCOPES
   });
   if (!result?.accessToken) throw new Error('Failed to acquire Teams app token');
@@ -203,7 +211,7 @@ function getOAuthUrl(state) {
     redirectUri: `${process.env.CALLBACK_BASE_URL}/api/teams/oauth/callback`,
     state,
   };
-  return msalClient.getAuthCodeUrl(authCodeUrlParams);
+  return getMsalClient().getAuthCodeUrl(authCodeUrlParams);
 }
 
 async function handleOAuthCallback(code) {
@@ -212,7 +220,7 @@ async function handleOAuthCallback(code) {
     scopes: CALLING_SCOPES,
     redirectUri: `${process.env.CALLBACK_BASE_URL}/api/teams/oauth/callback`,
   };
-  const response = await msalClient.acquireTokenByCode(tokenRequest);
+  const response = await getMsalClient().acquireTokenByCode(tokenRequest);
   return {
     accessToken: response.accessToken,
     account: response.account,
