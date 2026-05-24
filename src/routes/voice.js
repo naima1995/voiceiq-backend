@@ -1,0 +1,76 @@
+const express = require('express');
+const router = express.Router();
+const elevenlabs = require('../services/elevenlabs');
+const gemini = require('../services/gemini');
+const logger = require('../utils/logger');
+
+// ─── List available voices ────────────────────────────────────────────────
+router.get('/voices', async (req, res) => {
+  const configured = elevenlabs.getVoiceMap();
+  res.json({ voices: configured });
+});
+
+// ─── List all ElevenLabs voices on account ────────────────────────────────
+router.get('/voices/all', async (req, res) => {
+  const voices = await elevenlabs.listVoices();
+  res.json({ voices, count: voices.length });
+});
+
+// ─── Text to Speech — returns audio file ─────────────────────────────────
+router.post('/tts', async (req, res) => {
+  const { text, agentName, stream } = req.body;
+  if (!text) return res.status(400).json({ error: 'text is required' });
+
+  if (stream) {
+    await elevenlabs.streamTextToSpeech({ text, agentName, res });
+    return;
+  }
+
+  const audio = await elevenlabs.textToSpeech({ text, agentName });
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Length', audio.length);
+  res.send(audio);
+});
+
+// ─── Analyse sentiment ────────────────────────────────────────────────────
+router.post('/sentiment', async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text is required' });
+  const result = await gemini.analyseSentiment(text);
+  res.json(result);
+});
+
+// ─── Generate objection response ──────────────────────────────────────────
+router.post('/objection', async (req, res) => {
+  const { objection, agentName, companyName, script } = req.body;
+  if (!objection) return res.status(400).json({ error: 'objection is required' });
+  const result = await gemini.generateObjectionResponse({ objection, agentName, companyName, script });
+  res.json(result);
+});
+
+// ─── Generate opening greeting for an agent/lead combo ────────────────────
+router.post('/greeting', async (req, res) => {
+  const { agentName, leadName, leadCompany, companyName, script } = req.body;
+
+  const session = { callId: `preview-${Date.now()}` };
+  gemini.startSession({
+    callId: session.callId,
+    agentConfig: { name: agentName || 'Sophia', companyName, script },
+    leadData: { name: leadName, company: leadCompany },
+  });
+
+  const response = await gemini.processTurn({ callId: session.callId, userSpeech: null });
+  gemini.endSession(session.callId);
+
+  const audio = await elevenlabs.textToSpeech({
+    text: elevenlabs.addNaturalPauses(response.speech),
+    agentName: agentName?.toLowerCase() || 'sophia',
+  });
+
+  res.json({
+    speech: response.speech,
+    audio:  audio.toString('base64'),
+  });
+});
+
+module.exports = router;
