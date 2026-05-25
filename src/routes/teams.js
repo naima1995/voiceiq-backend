@@ -14,8 +14,9 @@ router.get('/status', async (req, res) => {
       numbers,
     });
   } catch (err) {
-    logger.warn('Teams status check failed', { error: err.message });
-    res.status(200).json({ connected: false, error: err.message });
+    const detail = err.message || err.code || err.statusCode || JSON.stringify(err) || 'unknown error';
+    logger.warn('Teams status check failed', { error: detail, stack: err.stack });
+    res.status(200).json({ connected: false, error: detail, code: err.code, status: err.statusCode });
   }
 });
 
