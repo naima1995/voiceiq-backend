@@ -9,7 +9,7 @@ const { createServer } = require('http');
 
 const logger = require('./utils/logger');
 const { errorHandler } = require('./middleware/errorHandler');
-const { apiKeyAuth } = require('./middleware/auth');
+// apiKeyAuth removed — access controlled by strict CORS origin allowlist
 const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
@@ -33,16 +33,26 @@ app.use(helmet({
   contentSecurityPolicy: false, // Handled by frontend
 }));
 
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:5500',  // live-server / VS Code Live Server
+  'https://voiceiq.co.uk',
+  'https://www.voiceiq.co.uk',
+  'https://voiceiq-one.vercel.app',
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+];
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3000',
-    'http://localhost:3000',
-    'https://voiceiq.co.uk',
-    'https://voiceiq-one.vercel.app',
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    logger.warn('CORS blocked', { origin });
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(morgan('combined', {
@@ -89,11 +99,11 @@ app.use('/api/', rateLimiter);
 app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
-app.use('/api/teams',    apiKeyAuth, teamsRoutes);
-app.use('/api/calendar', apiKeyAuth, calendarRoutes);
-app.use('/api/voice',    apiKeyAuth, voiceRoutes);
-app.use('/api/agents',   apiKeyAuth, agentsRoutes);
-app.use('/api/calls',    apiKeyAuth, callsRoutes);
+app.use('/api/teams',    teamsRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/voice',    voiceRoutes);
+app.use('/api/agents',   agentsRoutes);
+app.use('/api/calls',    callsRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────
 app.use((req, res) => {
