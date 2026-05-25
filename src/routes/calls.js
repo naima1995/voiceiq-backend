@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const gemini = require('../services/gemini');
+const { updateAgentStats } = require('./agents');
 
 // In-memory call log — swap for PostgreSQL in production
 const callLog = [];
@@ -9,6 +10,14 @@ const callLog = [];
 function logCall(callData) {
   callLog.unshift({ ...callData, loggedAt: new Date().toISOString() });
   if (callLog.length > 1000) callLog.splice(1000); // Keep last 1000
+
+  // Update the agent's live stats
+  if (callData.agentId) {
+    updateAgentStats(callData.agentId, {
+      outcome: callData.summary?.outcome || callData.outcome,
+      score:   callData.summary?.avgCallScore || callData.score,
+    });
+  }
 }
 
 // ─── Get call log ─────────────────────────────────────────────────────────

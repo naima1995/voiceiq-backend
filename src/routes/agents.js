@@ -7,35 +7,60 @@ const agents = new Map([
     id: 'sophia', name: 'Sophia', accent: 'Southern British', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_SOPHIA,
     companyName: 'VoiceIQ', script: null, faqContext: null,
-    stats: { callsToday: 156, bookings: 19, answerRate: 0.72, avgScore: 4.9 },
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
   ['james', {
     id: 'james', name: 'James', accent: 'Neutral UK Business', gender: 'Male',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_JAMES,
     companyName: 'VoiceIQ', script: null, faqContext: null,
-    stats: { callsToday: 91, bookings: 12, answerRate: 0.65, avgScore: 4.7 },
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
   ['charlotte', {
     id: 'charlotte', name: 'Charlotte', accent: 'Friendly Conversational', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_CHARLOTTE,
     companyName: 'VoiceIQ', script: null, faqContext: null,
-    stats: { callsToday: 94, bookings: 12, answerRate: 0.68, avgScore: 4.8 },
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
 ]);
 
+// ─── Update agent stats when a call completes ─────────────────────────────
+function updateAgentStats(agentId, { outcome, score }) {
+  const agent = agents.get(agentId);
+  if (!agent) return;
+  const s = agent.stats;
+
+  s.callsToday += 1;
+  if (outcome !== 'no_answer') {
+    s._answered += 1;
+    s.answerRate = parseFloat((s._answered / s.callsToday).toFixed(2));
+  }
+  if (outcome === 'meeting_booked') s.bookings += 1;
+  if (score) {
+    s._scores.push(score);
+    s.avgScore = parseFloat((s._scores.reduce((a, b) => a + b, 0) / s._scores.length).toFixed(1));
+  }
+  agents.set(agentId, agent);
+}
+
+// Strip internal tracking fields before sending to client
+function publicAgent(a) {
+  const { _scores, _answered, ...pub } = a.stats;
+  return { ...a, stats: pub };
+}
+
 // ─── List all agents ──────────────────────────────────────────────────────
 router.get('/', (req, res) => {
-  res.json({ agents: Array.from(agents.values()) });
+  res.json({ agents: Array.from(agents.values()).map(publicAgent) });
 });
 
 // ─── Get single agent ─────────────────────────────────────────────────────
 router.get('/:id', (req, res) => {
   const agent = agents.get(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
-  res.json(agent);
+  res.json(publicAgent(agent));
 });
 
 // ─── Create agent ─────────────────────────────────────────────────────────
@@ -83,3 +108,4 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+module.exports.updateAgentStats = updateAgentStats;
