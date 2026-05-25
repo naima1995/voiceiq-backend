@@ -74,7 +74,7 @@ app.get('/health', (req, res) => {
     integrations: {
       teams: !!process.env.AZURE_CLIENT_ID,
       elevenlabs: !!process.env.ELEVENLABS_API_KEY,
-      openai: !!process.env.OPENAI_API_KEY,
+      gemini: !!process.env.GEMINI_API_KEY,
       googleCalendar: !!process.env.GOOGLE_CLIENT_ID,
     }
   });
