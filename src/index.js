@@ -21,6 +21,7 @@ const callsRoutes = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
 
 const app = express();
+app.set('trust proxy', 1); // Required for Railway/reverse proxy
 const httpServer = createServer(app);
 
 // ─── WebSocket for live call monitoring ───────────────────────────────────
@@ -69,6 +70,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+// ─── Public routes (no auth) ──────────────────────────────────────────────
+app.get('/api/calendar/oauth/callback', async (req, res) => {
+  const calendar = require('./services/calendar');
+  const { code } = req.query;
+  try {
+    const tokens = await calendar.handleOAuthCallback(code);
+    res.json({ connected: true, hasRefreshToken: !!tokens.refresh_token, refreshToken: tokens.refresh_token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────
 app.use('/api/', rateLimiter);
 
@@ -77,7 +90,6 @@ app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
 app.use('/api/teams',    apiKeyAuth, teamsRoutes);
-app.use('/api/calendar/oauth/callback', calendarRoutes); // public — Google OAuth callback
 app.use('/api/calendar', apiKeyAuth, calendarRoutes);
 app.use('/api/voice',    apiKeyAuth, voiceRoutes);
 app.use('/api/agents',   apiKeyAuth, agentsRoutes);
