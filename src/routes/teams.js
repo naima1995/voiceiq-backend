@@ -3,6 +3,32 @@ const router = express.Router();
 const teams = require('../services/teams');
 const logger = require('../utils/logger');
 
+// ─── Connection status — verifies Azure credentials & fetches numbers ─────
+router.get('/status', async (req, res) => {
+  try {
+    const numbers = await teams.listTeamsNumbers();
+    res.json({
+      connected: true,
+      tenant: process.env.AZURE_TENANT_ID,
+      numbersFound: numbers.length,
+      numbers,
+    });
+  } catch (err) {
+    logger.warn('Teams status check failed', { error: err.message });
+    res.status(200).json({ connected: false, error: err.message });
+  }
+});
+
+// ─── Get Microsoft OAuth sign-in URL (delegated permissions) ─────────────
+router.get('/oauth/url', async (req, res) => {
+  try {
+    const url = await teams.getOAuthUrl(req.query.state || 'voiceiq');
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── List Teams phone numbers ─────────────────────────────────────────────
 router.get('/numbers', async (req, res) => {
   const numbers = await teams.listTeamsNumbers();
@@ -36,11 +62,24 @@ router.delete('/call/:teamsCallId', async (req, res) => {
   res.json(result);
 });
 
-// ─── OAuth callback ───────────────────────────────────────────────────────
+// ─── OAuth callback — redirects back to the dashboard ────────────────────
 router.get('/oauth/callback', async (req, res) => {
-  const { code } = req.query;
-  const result = await teams.handleOAuthCallback(code);
-  res.json({ connected: true, account: result.account });
+  const { code, error, error_description } = req.query;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://voiceiq.co.uk';
+
+  if (error) {
+    logger.warn('Teams OAuth error', { error, error_description });
+    return res.redirect(`${frontendUrl}?teams_error=${encodeURIComponent(error_description || error)}`);
+  }
+
+  try {
+    const result = await teams.handleOAuthCallback(code);
+    logger.info('Teams OAuth success', { account: result.account?.username });
+    res.redirect(`${frontendUrl}?teams_connected=1&account=${encodeURIComponent(result.account?.username || '')}`);
+  } catch (err) {
+    logger.error('Teams OAuth callback error', { error: err.message });
+    res.redirect(`${frontendUrl}?teams_error=${encodeURIComponent(err.message)}`);
+  }
 });
 
 module.exports = router;
