@@ -77,6 +77,7 @@ app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
 app.use('/api/teams',    apiKeyAuth, teamsRoutes);
+app.use('/api/calendar/oauth/callback', calendarRoutes); // public — Google OAuth callback
 app.use('/api/calendar', apiKeyAuth, calendarRoutes);
 app.use('/api/voice',    apiKeyAuth, voiceRoutes);
 app.use('/api/agents',   apiKeyAuth, agentsRoutes);
