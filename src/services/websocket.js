@@ -9,13 +9,19 @@ const clients = new Set();
 function initWebSocket(httpServer) {
   wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-  wss.on('connection', (ws, req) => {
-    // Simple API key check on connect
-    const url = new URL(req.url, 'http://localhost');
-    const key = url.searchParams.get('api_key');
+  const ALLOWED_WS_ORIGINS = [
+    'https://voiceiq.co.uk',
+    'https://www.voiceiq.co.uk',
+    'https://voiceiq-one.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5500',
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  ];
 
-    if (key !== process.env.API_KEY) {
-      ws.close(4001, 'Unauthorised');
+  wss.on('connection', (ws, req) => {
+    const origin = req.headers.origin;
+    if (origin && !ALLOWED_WS_ORIGINS.includes(origin)) {
+      ws.close(4001, 'Unauthorised origin');
       return;
     }
 

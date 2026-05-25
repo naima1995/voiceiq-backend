@@ -199,14 +199,14 @@ async function playAudioPrompt({ teamsCallId, audioUrl }) {
   });
 }
 
-// ─── OAuth Flow (for delegated permissions / user consent) ───────────────
+// ─── OAuth Flow (delegated — user-level scopes only) ─────────────────────
+// Calls.Initiate.All / Calls.AccessMedia.All are app-only permissions —
+// they are granted via admin consent, not via user OAuth.
 function getOAuthUrl(state) {
   const authCodeUrlParams = {
     scopes: [
-      'Calls.Initiate.All',
-      'Calls.AccessMedia.All',
-      'OnlineMeetings.ReadWrite',
       'User.Read',
+      'OnlineMeetings.ReadWrite',
     ],
     redirectUri: `${process.env.CALLBACK_BASE_URL}/api/teams/oauth/callback`,
     state,

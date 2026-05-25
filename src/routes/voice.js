@@ -3,6 +3,16 @@ const router = express.Router();
 const elevenlabs = require('../services/elevenlabs');
 const gemini = require('../services/gemini');
 const logger = require('../utils/logger');
+const audioCache = require('../utils/audioCache');
+
+// ─── Serve cached audio (used by Twilio <Play>) ───────────────────────────
+router.get('/audio/:id', (req, res) => {
+  const entry = audioCache.get(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Audio not found or expired' });
+  res.setHeader('Content-Type', entry.contentType);
+  res.setHeader('Content-Length', entry.buffer.length);
+  res.send(entry.buffer);
+});
 
 // ─── List available voices ────────────────────────────────────────────────
 router.get('/voices', async (req, res) => {

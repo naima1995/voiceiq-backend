@@ -13,11 +13,12 @@ const { errorHandler } = require('./middleware/errorHandler');
 const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
-const teamsRoutes = require('./routes/teams');
+const teamsRoutes   = require('./routes/teams');
+const twilioRoutes  = require('./routes/twilio');
 const calendarRoutes = require('./routes/calendar');
-const voiceRoutes = require('./routes/voice');
-const agentsRoutes = require('./routes/agents');
-const callsRoutes = require('./routes/calls');
+const voiceRoutes   = require('./routes/voice');
+const agentsRoutes  = require('./routes/agents');
+const callsRoutes   = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
 
 const app = express();
@@ -75,6 +76,7 @@ app.get('/health', (req, res) => {
       teams: !!process.env.AZURE_CLIENT_ID,
       elevenlabs: !!process.env.ELEVENLABS_API_KEY,
       gemini: !!process.env.GEMINI_API_KEY,
+      twilio: !!process.env.TWILIO_ACCOUNT_SID,
       googleCalendar: !!process.env.GOOGLE_CLIENT_ID,
     }
   });
@@ -100,6 +102,7 @@ app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
 app.use('/api/teams',    teamsRoutes);
+app.use('/api/twilio',   twilioRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/voice',    voiceRoutes);
 app.use('/api/agents',   agentsRoutes);
