@@ -14,6 +14,38 @@ router.get('/audio/:id', (req, res) => {
   res.send(entry.buffer);
 });
 
+// ─── ElevenLabs key diagnostics ──────────────────────────────────────────
+router.get('/diagnose', async (req, res) => {
+  const keySet  = !!process.env.ELEVENLABS_API_KEY;
+  const keySnip = keySet
+    ? `${process.env.ELEVENLABS_API_KEY.slice(0, 6)}...${process.env.ELEVENLABS_API_KEY.slice(-4)}`
+    : null;
+
+  let apiOk = false;
+  let apiError = null;
+  let voices = [];
+
+  if (keySet) {
+    try {
+      voices = await elevenlabs.listVoices();
+      apiOk = true;
+    } catch (err) {
+      apiError = err.response
+        ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 200)}`
+        : err.message;
+    }
+  }
+
+  res.json({
+    keySet,
+    keySnippet: keySnip,
+    apiReachable: apiOk,
+    voiceCount: voices.length,
+    error: apiError,
+    configuredVoices: elevenlabs.getVoiceMap(),
+  });
+});
+
 // ─── List available voices ────────────────────────────────────────────────
 router.get('/voices', async (req, res) => {
   const configured = elevenlabs.getVoiceMap();
@@ -74,7 +106,7 @@ router.post('/greeting', async (req, res) => {
 
   const audio = await elevenlabs.textToSpeech({
     text: elevenlabs.addNaturalPauses(response.speech),
-    agentName: agentName?.toLowerCase() || 'sophia',
+    agentName: agentName?.toLowerCase() || 'james',
   });
 
   res.json({

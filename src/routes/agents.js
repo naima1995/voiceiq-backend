@@ -3,13 +3,6 @@ const router = express.Router();
 
 // In-memory store — swap for PostgreSQL in production
 const agents = new Map([
-  ['sophia', {
-    id: 'sophia', name: 'Sophia', accent: 'Southern British', gender: 'Female',
-    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_SOPHIA,
-    companyName: 'VoiceIQ', script: null, faqContext: null,
-    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
-    createdAt: new Date().toISOString(),
-  }],
   ['james', {
     id: 'james', name: 'James', accent: 'Neutral UK Business', gender: 'Male',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_JAMES,
@@ -17,9 +10,23 @@ const agents = new Map([
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
-  ['charlotte', {
-    id: 'charlotte', name: 'Charlotte', accent: 'Friendly Conversational', gender: 'Female',
-    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_CHARLOTTE,
+  ['rachel', {
+    id: 'rachel', name: 'Rachel', accent: 'Southern British', gender: 'Female',
+    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_RACHEL,
+    companyName: 'VoiceIQ', script: null, faqContext: null,
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
+    createdAt: new Date().toISOString(),
+  }],
+  ['shelley', {
+    id: 'shelley', name: 'Shelley', accent: 'Warm British Professional', gender: 'Female',
+    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_SHELLEY,
+    companyName: 'VoiceIQ', script: null, faqContext: null,
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
+    createdAt: new Date().toISOString(),
+  }],
+  ['alexis', {
+    id: 'alexis', name: 'Alexis', accent: 'Clear Confident British', gender: 'Female',
+    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_ALEXIS,
     companyName: 'VoiceIQ', script: null, faqContext: null,
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),

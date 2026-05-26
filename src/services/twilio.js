@@ -17,7 +17,7 @@ function getClient() {
 }
 
 // ─── Make outbound call ───────────────────────────────────────────────────
-async function makeOutboundCall({ toNumber, fromNumber, agentId = 'sophia', leadData = {} }) {
+async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadData = {} }) {
   const c    = getClient();
   const callId = uuidv4();
   const from = fromNumber || process.env.TWILIO_PHONE_NUMBER;

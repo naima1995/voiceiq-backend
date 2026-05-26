@@ -3,11 +3,12 @@ const logger = require('../utils/logger');
 
 const BASE_URL = 'https://api.elevenlabs.io/v1';
 
-// Voice ID map — set in .env, these are defaults
+// Voice ID map — set in Railway Variables, no hardcoded fallbacks for custom voices
 const VOICE_IDS = {
-  sophia:    process.env.ELEVENLABS_VOICE_SOPHIA    || '21m00Tcm4TlvDq8ikWAM',
-  james:     process.env.ELEVENLABS_VOICE_JAMES     || 'AZnzlk1XvdvUeBnXmlld',
-  charlotte: process.env.ELEVENLABS_VOICE_CHARLOTTE || 'EXAVITQu4vr4xnSDxMaL',
+  james:   process.env.ELEVENLABS_VOICE_JAMES   || 'AZnzlk1XvdvUeBnXmlld',
+  rachel:  process.env.ELEVENLABS_VOICE_RACHEL  || '21m00Tcm4TlvDq8ikWAM',
+  shelley: process.env.ELEVENLABS_VOICE_SHELLEY || '',
+  alexis:  process.env.ELEVENLABS_VOICE_ALEXIS  || '',
 };
 
 const headers = () => ({
@@ -17,42 +18,47 @@ const headers = () => ({
 
 // ─── Voice Settings per agent personality ────────────────────────────────
 const VOICE_SETTINGS = {
-  sophia: {
-    stability: 0.55,         // Slight variation for warmth
-    similarity_boost: 0.85,
-    style: 0.2,              // Natural, not over-stylised
-    use_speaker_boost: true,
-  },
   james: {
-    stability: 0.65,         // More measured / professional
+    stability: 0.65,         // Measured, professional
     similarity_boost: 0.80,
     style: 0.1,
     use_speaker_boost: true,
   },
-  charlotte: {
-    stability: 0.45,         // More expressive / friendly
-    similarity_boost: 0.88,
-    style: 0.35,
+  rachel: {
+    stability: 0.55,         // Warm, natural British
+    similarity_boost: 0.85,
+    style: 0.2,
+    use_speaker_boost: true,
+  },
+  shelley: {
+    stability: 0.58,         // Warm, approachable professional
+    similarity_boost: 0.83,
+    style: 0.25,
+    use_speaker_boost: true,
+  },
+  alexis: {
+    stability: 0.62,         // Confident, clear
+    similarity_boost: 0.82,
+    style: 0.15,
     use_speaker_boost: true,
   },
 };
 
 // ─── Text to Speech — returns audio Buffer ────────────────────────────────
-async function textToSpeech({ text, agentName = 'sophia', outputFormat = 'mp3_44100_128' }) {
+async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_44100_128' }) {
   const voiceId = VOICE_IDS[agentName.toLowerCase()];
-  if (!voiceId) throw new Error(`Unknown agent voice: ${agentName}`);
+  if (!voiceId) throw new Error(`No voice ID configured for agent "${agentName}" — set ELEVENLABS_VOICE_${agentName.toUpperCase()} in Railway Variables`);
 
-  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.sophia;
+  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
 
   logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length });
 
   const response = await axios.post(
-    `${BASE_URL}/text-to-speech/${voiceId}`,
+    `${BASE_URL}/text-to-speech/${voiceId}?output_format=${outputFormat}`,
     {
       text,
       model_id: 'eleven_turbo_v2',     // Low latency — ideal for calls
       voice_settings: settings,
-      output_format: outputFormat,
     },
     {
       headers: headers(),
@@ -66,14 +72,14 @@ async function textToSpeech({ text, agentName = 'sophia', outputFormat = 'mp3_44
 }
 
 // ─── Streaming TTS — pipes audio stream (for real-time use) ──────────────
-async function streamTextToSpeech({ text, agentName = 'sophia', res }) {
+async function streamTextToSpeech({ text, agentName = 'james', res }) {
   const voiceId = VOICE_IDS[agentName.toLowerCase()];
-  if (!voiceId) throw new Error(`Unknown agent voice: ${agentName}`);
+  if (!voiceId) throw new Error(`No voice ID configured for agent "${agentName}" — set ELEVENLABS_VOICE_${agentName.toUpperCase()} in Railway Variables`);
 
-  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.sophia;
+  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
 
   const response = await axios.post(
-    `${BASE_URL}/text-to-speech/${voiceId}/stream`,
+    `${BASE_URL}/text-to-speech/${voiceId}/stream?output_format=mp3_44100_128`,
     {
       text,
       model_id: 'eleven_turbo_v2',
@@ -107,9 +113,10 @@ async function listVoices() {
 // ─── Get voice IDs configured ─────────────────────────────────────────────
 function getVoiceMap() {
   return {
-    sophia:    { id: VOICE_IDS.sophia,    name: 'Sophia',    accent: 'Southern British', gender: 'Female' },
-    james:     { id: VOICE_IDS.james,     name: 'James',     accent: 'Neutral UK Business', gender: 'Male' },
-    charlotte: { id: VOICE_IDS.charlotte, name: 'Charlotte', accent: 'Friendly Conversational', gender: 'Female' },
+    james:   { id: VOICE_IDS.james,   name: 'James',   accent: 'Neutral UK Business',      gender: 'Male'   },
+    rachel:  { id: VOICE_IDS.rachel,  name: 'Rachel',  accent: 'Southern British',          gender: 'Female' },
+    shelley: { id: VOICE_IDS.shelley, name: 'Shelley', accent: 'Warm British Professional', gender: 'Female' },
+    alexis:  { id: VOICE_IDS.alexis,  name: 'Alexis',  accent: 'Clear Confident British',   gender: 'Female' },
   };
 }
 

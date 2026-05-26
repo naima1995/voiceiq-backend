@@ -15,7 +15,7 @@ function twiml(inner) {
 
 // ─── Twilio: call answered — generate greeting, start AI session ──────────
 router.post('/twilio/answer', async (req, res) => {
-  const { agentId = 'sophia', callId, leadName = '', leadCompany = '' } = req.query;
+  const { agentId = 'james', callId, leadName = '', leadCompany = '' } = req.query;
   const { CallSid, From, To } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
@@ -51,7 +51,7 @@ router.post('/twilio/answer', async (req, res) => {
 
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
-  const { agentId = 'sophia', callId } = req.query;
+  const { agentId = 'james', callId } = req.query;
   const { SpeechResult, CallSid } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
@@ -192,7 +192,7 @@ async function handleTeamsCallEvent(event) {
         });
 
         const session = gemini.getSession(voiceiqCallId);
-        const agentName = session?.agentConfig?.name?.toLowerCase() || agentId || 'sophia';
+        const agentName = session?.agentConfig?.name?.toLowerCase() || agentId || 'james';
         const audioBuffer = await elevenlabs.textToSpeech({
           text: elevenlabs.addNaturalPauses(aiResponse.speech),
           agentName,
@@ -233,7 +233,7 @@ async function handleTeamsCallEvent(event) {
         teamsCallId,
         direction:   'outbound',
         channel:     'teams',
-        agentId:     agentId || 'sophia',
+        agentId:     agentId || 'james',
         duration,
         endedAt:     new Date().toISOString(),
         summary,
