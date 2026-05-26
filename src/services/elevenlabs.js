@@ -57,7 +57,7 @@ async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_441
     `${BASE_URL}/text-to-speech/${voiceId}?output_format=${outputFormat}`,
     {
       text,
-      model_id: 'eleven_turbo_v2',     // Low latency — ideal for calls
+      model_id: 'eleven_flash_v2_5',   // Lowest latency — ideal for live calls
       voice_settings: settings,
     },
     {
@@ -82,7 +82,7 @@ async function streamTextToSpeech({ text, agentName = 'james', res }) {
     `${BASE_URL}/text-to-speech/${voiceId}/stream?output_format=mp3_44100_128`,
     {
       text,
-      model_id: 'eleven_turbo_v2',
+      model_id: 'eleven_flash_v2_5',
       voice_settings: settings,
     },
     {
