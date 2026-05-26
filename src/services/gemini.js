@@ -80,16 +80,17 @@ const sessions = new Map();
 
 // ─── Start a new call session ─────────────────────────────────────────────
 function startSession({ callId, agentConfig, leadData }) {
+  const rawName = agentConfig.name || 'James';
   const systemInstruction = buildSystemPrompt({
-    agentName:      agentConfig.name || 'Sophia',
-    agentAccent:    agentConfig.accent || 'Southern British',
+    agentName:      rawName.charAt(0).toUpperCase() + rawName.slice(1),
+    agentAccent:    agentConfig.accent || 'Neutral UK Business',
     companyName:    agentConfig.companyName || 'VoiceIQ',
     campaignScript: agentConfig.script,
     faqContext:     agentConfig.faqContext,
   });
 
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     systemInstruction,
     safetySettings: SAFETY_SETTINGS,
     generationConfig: {
@@ -183,7 +184,7 @@ async function generateCallSummary({ callId, duration }) {
     .join('\n');
 
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     generationConfig: {
       temperature: 0.3,
       maxOutputTokens: 500,
@@ -245,7 +246,7 @@ Return this JSON:
 // ─── Analyse sentiment from transcript snippet ────────────────────────────
 async function analyseSentiment(text) {
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 100,
@@ -264,7 +265,7 @@ async function analyseSentiment(text) {
 // ─── Handle objection with Gemini ─────────────────────────────────────────
 async function generateObjectionResponse({ objection, agentName, companyName, script }) {
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 150,
