@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const elevenlabs = require('../services/elevenlabs');
 const gemini = require('../services/gemini');
 const logger = require('../utils/logger');
@@ -12,6 +13,32 @@ router.get('/audio/:id', (req, res) => {
   res.setHeader('Content-Type', entry.contentType);
   res.setHeader('Content-Length', entry.buffer.length);
   res.send(entry.buffer);
+});
+
+// ─── Gemini model diagnostics — lists available models for this API key ──
+router.get('/diagnose-gemini', async (req, res) => {
+  const keySet = !!process.env.GEMINI_API_KEY;
+  if (!keySet) return res.json({ keySet: false, models: [] });
+
+  try {
+    const response = await axios.get(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}&pageSize=50`
+    );
+    const models = (response.data.models || [])
+      .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+      .map(m => m.name.replace('models/', ''));
+
+    res.json({
+      keySet,
+      currentModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+      availableModels: models,
+    });
+  } catch (err) {
+    res.json({
+      keySet,
+      error: err.response ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}` : err.message,
+    });
+  }
 });
 
 // ─── ElevenLabs key diagnostics ──────────────────────────────────────────
