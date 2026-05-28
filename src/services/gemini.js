@@ -90,7 +90,7 @@ function startSession({ callId, agentConfig, leadData }) {
   });
 
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     systemInstruction,
     safetySettings: SAFETY_SETTINGS,
     generationConfig: {
@@ -184,7 +184,7 @@ async function generateCallSummary({ callId, duration }) {
     .join('\n');
 
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     generationConfig: {
       temperature: 0.3,
       maxOutputTokens: 500,
@@ -246,7 +246,7 @@ Return this JSON:
 // ─── Analyse sentiment from transcript snippet ────────────────────────────
 async function analyseSentiment(text) {
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 100,
@@ -265,7 +265,7 @@ async function analyseSentiment(text) {
 // ─── Handle objection with Gemini ─────────────────────────────────────────
 async function generateObjectionResponse({ objection, agentName, companyName, script }) {
   const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-05-20',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 150,
