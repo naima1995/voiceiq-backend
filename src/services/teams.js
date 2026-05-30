@@ -1,6 +1,7 @@
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 const logger = require('../utils/logger');
 
 // ─── MSAL Config (lazy init) ──────────────────────────────────────────────
@@ -69,17 +70,31 @@ async function listTeamsNumbers() {
 // Uses Graph API Communications — Calls endpoint
 // Requires Calls.Initiate.All + Calls.AccessMedia.All app permissions
 async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, leadData }) {
-  const client = await getGraphClient();
   const callId = uuidv4();
 
   // clientContext is passed through every webhook callback so we can
   // correlate events back to our session. Max 256 chars — keep it compact.
   const clientContext = JSON.stringify({ v: callId, a: agentId });
 
+  // Normalise phone number — Graph requires E.164 with + prefix
+  const normalisedTo = toNumber.startsWith('+') ? toNumber : `+${toNumber}`;
+  const normalisedFrom = (fromNumber || process.env.TEAMS_PHONE_NUMBER || '');
+  const normalisedFromE164 = normalisedFrom.startsWith('+') ? normalisedFrom : `+${normalisedFrom}`;
+
   const callPayload = {
     '@odata.type': '#microsoft.graph.call',
     callbackUri: `${process.env.CALLBACK_BASE_URL}/api/webhooks/teams/call-events`,
-    tenantId: process.env.AZURE_TENANT_ID,
+    source: {
+      '@odata.type': '#microsoft.graph.participantInfo',
+      identity: {
+        '@odata.type': '#microsoft.graph.communicationsIdentitySet',
+        applicationInstance: {
+          '@odata.type': '#microsoft.graph.identity',
+          displayName: 'VoiceIQ',
+          id: process.env.AZURE_BOT_OBJECT_ID,
+        },
+      },
+    },
     targets: [
       {
         '@odata.type': '#microsoft.graph.invitationParticipantInfo',
@@ -87,28 +102,55 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
           '@odata.type': '#microsoft.graph.communicationsIdentitySet',
           phone: {
             '@odata.type': '#microsoft.graph.identity',
-            id: toNumber
-          }
-        }
-      }
+            id: normalisedTo,
+          },
+        },
+      },
     ],
     requestedModalities: ['audio'],
     mediaConfig: {
       '@odata.type': '#microsoft.graph.serviceHostedMediaConfig',
     },
+    tenantId: process.env.AZURE_TENANT_ID,
     clientContext,
   };
 
-  logger.info('Initiating Teams outbound call', { toNumber, callId, agentId });
+  logger.info('Initiating Teams outbound call', { toNumber: normalisedTo, callId, agentId, payload: JSON.stringify(callPayload) });
 
-  const call = await client.api('/communications/calls').post(callPayload);
+  // Use axios directly so we capture the full Microsoft error body on failure
+  const token = await getAppToken();
+  let call;
+  try {
+    const response = await axios.post(
+      'https://graph.microsoft.com/v1.0/communications/calls',
+      callPayload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    call = response.data;
+  } catch (axiosErr) {
+    const msError = axiosErr.response?.data;
+    logger.error('Graph API call creation failed', {
+      status: axiosErr.response?.status,
+      msError: JSON.stringify(msError),
+      payload: JSON.stringify(callPayload),
+    });
+    const err = new Error(JSON.stringify(msError || axiosErr.message));
+    err.body = msError;
+    err.statusCode = axiosErr.response?.status;
+    throw err;
+  }
 
   return {
     callId,
     teamsCallId: call.id,
     status: call.state,
-    toNumber,
-    fromNumber: fromNumber || process.env.TEAMS_PHONE_NUMBER,
+    toNumber: normalisedTo,
+    fromNumber: normalisedFromE164,
     initiatedAt: new Date().toISOString(),
   };
 }
