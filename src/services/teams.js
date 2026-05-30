@@ -80,19 +80,6 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
     '@odata.type': '#microsoft.graph.call',
     callbackUri: `${process.env.CALLBACK_BASE_URL}/api/webhooks/teams/call-events`,
     tenantId: process.env.AZURE_TENANT_ID,
-    // source uses applicationInstance (bot identity) — phone identity is
-    // only valid for the target (the person being called).
-    source: {
-      '@odata.type': '#microsoft.graph.participantInfo',
-      identity: {
-        '@odata.type': '#microsoft.graph.communicationsIdentitySet',
-        applicationInstance: {
-          '@odata.type': '#microsoft.graph.identity',
-          displayName: 'VoiceIQ',
-          id: process.env.AZURE_BOT_OBJECT_ID || process.env.AZURE_CLIENT_ID,
-        }
-      }
-    },
     targets: [
       {
         '@odata.type': '#microsoft.graph.invitationParticipantInfo',
@@ -108,7 +95,6 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
     requestedModalities: ['audio'],
     mediaConfig: {
       '@odata.type': '#microsoft.graph.serviceHostedMediaConfig',
-      preFetchMedia: []
     },
     clientContext,
   };

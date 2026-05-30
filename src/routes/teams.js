@@ -41,13 +41,19 @@ router.post('/call', async (req, res) => {
   const { toNumber, fromNumber, agentId, leadData } = req.body;
   if (!toNumber) return res.status(400).json({ error: 'toNumber is required' });
 
-  const result = await teams.makeOutboundCall({
-    toNumber, fromNumber, agentId, leadData,
-    callbackUrl: process.env.CALLBACK_BASE_URL,
-  });
-
-  logger.info('Outbound call initiated', result);
-  res.json(result);
+  try {
+    const result = await teams.makeOutboundCall({
+      toNumber, fromNumber, agentId, leadData,
+      callbackUrl: process.env.CALLBACK_BASE_URL,
+    });
+    logger.info('Outbound call initiated', result);
+    res.json(result);
+  } catch (err) {
+    // Surface the full Graph API error so we can debug payload issues
+    const detail = err.body || err.message || JSON.stringify(err);
+    logger.error('Teams call initiation failed', { error: detail });
+    res.status(500).json({ error: detail });
+  }
 });
 
 // ─── Transfer call to human ───────────────────────────────────────────────
