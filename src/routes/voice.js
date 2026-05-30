@@ -9,7 +9,11 @@ const audioCache = require('../utils/audioCache');
 // ─── Serve cached audio (used by Twilio <Play>) ───────────────────────────
 router.get('/audio/:id', (req, res) => {
   const entry = audioCache.get(req.params.id);
-  if (!entry) return res.status(404).json({ error: 'Audio not found or expired' });
+  if (!entry) {
+    logger.warn('Audio fetch: not found', { id: req.params.id, ip: req.ip });
+    return res.status(404).json({ error: 'Audio not found or expired' });
+  }
+  logger.info('Audio fetch: serving', { id: req.params.id, bytes: entry.buffer.length, ip: req.ip });
   res.setHeader('Content-Type', entry.contentType);
   res.setHeader('Content-Length', entry.buffer.length);
   res.send(entry.buffer);
