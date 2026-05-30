@@ -131,12 +131,8 @@ router.post('/twilio/status', async (req, res) => {
 });
 
 // ─── Microsoft Teams Call Events ──────────────────────────────────────────
-// Microsoft sends call state notifications to this endpoint.
-// Must be publicly reachable — use ngrok in dev.
-// Register as callbackUri in every Teams call payload.
 router.post('/teams/call-events', async (req, res) => {
-  // Microsoft requires a 200 immediately — process async
-  res.status(200).send();
+  res.status(200).send(); // Microsoft requires immediate 200
 
   let body;
   try {
@@ -150,115 +146,164 @@ router.post('/teams/call-events', async (req, res) => {
   if (!Array.isArray(value)) return;
 
   for (const event of value) {
-    await handleTeamsCallEvent(event);
+    try {
+      await handleTeamsCallEvent(event);
+    } catch (err) {
+      logger.error('Teams call event handler error', { error: err.message });
+    }
   }
 });
 
+// ─── Parse voiceiq context from clientContext field ───────────────────────
+function parseCtx(clientContext) {
+  try { return JSON.parse(clientContext || '{}'); } catch { return {}; }
+}
+
+// ─── Build a public audio URL from ElevenLabs buffer ─────────────────────
+async function buildAudioUrl(text, agentName) {
+  const audioBuffer = await elevenlabs.textToSpeech({
+    text: elevenlabs.addNaturalPauses(text),
+    agentName,
+  });
+  return `${process.env.CALLBACK_BASE_URL}/api/voice/audio/${audioCache.store(audioBuffer)}`;
+}
+
+// ─── Main Teams event dispatcher ─────────────────────────────────────────
 async function handleTeamsCallEvent(event) {
-  const { resourceData, changeType } = event;
+  const { resourceData } = event;
   if (!resourceData) return;
 
   const teamsCallId = resourceData.id;
-  const callState   = resourceData.state;
+  const { voiceiqCallId, agentId } = parseCtx(resourceData.clientContext);
+  const agentName = (agentId || 'james').toLowerCase();
 
-  logger.info('Teams call event', { teamsCallId, callState, changeType });
+  // ── recognizeAsync completed — prospect has spoken ──────────────────────
+  if (resourceData.recognizeResult) {
+    await handleRecognizeCompleted({ teamsCallId, voiceiqCallId, agentName, recognizeResult: resourceData.recognizeResult });
+    return;
+  }
 
-  // Parse voiceiq context stored in clientContext
-  let voiceiqCtx = {};
-  try {
-    if (resourceData.clientContext) {
-      voiceiqCtx = JSON.parse(resourceData.clientContext);
-    }
-  } catch { /* no context */ }
-
-  const { voiceiqCallId, agentId } = voiceiqCtx;
+  const callState = resourceData.state;
+  logger.info('Teams call event', { teamsCallId, callState, voiceiqCallId });
 
   switch (callState) {
 
-    // ── Call is ringing / connecting ─────────────────────────────────────
     case 'establishing':
       emit.callStarted({ callId: voiceiqCallId, teamsCallId, state: 'ringing' });
       break;
 
-    // ── Call connected — AI speaks first ─────────────────────────────────
+    // ── Call connected — start AI session, play greeting, start listening ──
     case 'established': {
       emit.callStarted({ callId: voiceiqCallId, teamsCallId, state: 'connected' });
 
-      // Trigger initial AI greeting
-      try {
-        const aiResponse = await gemini.processTurn({
-          callId: voiceiqCallId,
-          userSpeech: null, // null = opening turn
-        });
+      gemini.startSession({
+        callId: voiceiqCallId,
+        agentConfig: {
+          name: agentName,
+          companyName: process.env.COMPANY_NAME || 'VoiceIQ',
+        },
+        leadData: parseCtx(resourceData.clientContext).leadData || {},
+      });
 
-        const session = gemini.getSession(voiceiqCallId);
-        const agentName = session?.agentConfig?.name?.toLowerCase() || agentId || 'james';
-        const audioBuffer = await elevenlabs.textToSpeech({
-          text: elevenlabs.addNaturalPauses(aiResponse.speech),
-          agentName,
-        });
+      const aiResponse = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: null });
+      const audioUrl   = await buildAudioUrl(aiResponse.speech, agentName);
 
-        // In full production: inject audio into Teams call via Bot Framework / ACS
-        // For now: log the audio is ready
-        logger.info('Opening audio ready', {
-          callId: voiceiqCallId,
-          speech: aiResponse.speech,
-          audioBytes: audioBuffer.length,
-        });
+      emit.agentSpeaking({ callId: voiceiqCallId, teamsCallId, speech: aiResponse.speech, intent: aiResponse.intent });
+      logger.info('Teams call established — playing greeting', { voiceiqCallId, speech: aiResponse.speech });
 
-        emit.agentSpeaking({
-          callId:    voiceiqCallId,
-          teamsCallId,
-          speech:    aiResponse.speech,
-          intent:    aiResponse.intent,
-        });
-      } catch (err) {
-        logger.error('Failed to generate opening greeting', { error: err.message });
-      }
-      break;
-    }
-
-    // ── Call terminated ───────────────────────────────────────────────────
-    case 'terminated': {
-      const duration = resourceData.durationInSeconds || 0;
-
-      let summary = null;
-      if (voiceiqCallId) {
-        summary = await gemini.generateCallSummary({ callId: voiceiqCallId, duration });
-        gemini.endSession(voiceiqCallId);
-      }
-
-      const callRecord = {
-        callId:      voiceiqCallId,
+      await teams.recognizeAsync({
         teamsCallId,
-        direction:   'outbound',
-        channel:     'teams',
-        agentId:     agentId || 'james',
-        duration,
-        endedAt:     new Date().toISOString(),
-        summary,
-      };
-
-      logCall(callRecord);
-      emit.callEnded({ ...callRecord });
-      if (summary) emit.callSummary({ callId: voiceiqCallId, summary });
-
-      logger.info('Call terminated and logged', {
-        callId:  voiceiqCallId,
-        outcome: summary?.outcome,
-        duration,
+        audioUrl,
+        clientContext: JSON.stringify({ voiceiqCallId, agentId }),
       });
       break;
     }
 
-    // ── Call updated (e.g. participant joined/left) ────────────────────────
-    case 'updating':
-      logger.debug('Teams call updating', { teamsCallId });
+    // ── Call ended ─────────────────────────────────────────────────────────
+    case 'terminated': {
+      const duration = resourceData.durationInSeconds || 0;
+      let summary = null;
+
+      if (voiceiqCallId) {
+        try {
+          summary = await gemini.generateCallSummary({ callId: voiceiqCallId, duration });
+          gemini.endSession(voiceiqCallId);
+        } catch (err) {
+          logger.warn('Call summary failed', { error: err.message });
+        }
+      }
+
+      const callRecord = {
+        callId: voiceiqCallId, teamsCallId,
+        direction: 'outbound', channel: 'teams',
+        agentId: agentName, duration,
+        endedAt: new Date().toISOString(), summary,
+      };
+
+      logCall(callRecord);
+      emit.callEnded(callRecord);
+      if (summary) emit.callSummary({ callId: voiceiqCallId, summary });
+      logger.info('Teams call terminated', { voiceiqCallId, duration, outcome: summary?.outcome });
       break;
+    }
 
     default:
       logger.debug('Unhandled Teams call state', { callState, teamsCallId });
   }
+}
+
+// ─── Handle recognizeAsync result — core AI conversation turn ─────────────
+async function handleRecognizeCompleted({ teamsCallId, voiceiqCallId, agentName, recognizeResult }) {
+  const recognitionType = recognizeResult.recognitionType;
+
+  // Extract speech text — Microsoft returns it in different shapes
+  const speechText = recognizeResult.speech?.speech
+    || recognizeResult.speech?.text
+    || recognizeResult.speechResult?.text
+    || '';
+
+  logger.info('Teams recognize completed', { teamsCallId, recognitionType, speechText });
+
+  // No speech detected — reprompt gently
+  if (!speechText || ['timeout', 'completedSilenceDetected', 'failed'].includes(recognitionType)) {
+    logger.info('No speech detected, reprompting', { teamsCallId });
+    const audioUrl = await buildAudioUrl("I'm sorry, I didn't catch that — could you say that again?", agentName);
+    await teams.recognizeAsync({ teamsCallId, audioUrl, clientContext: JSON.stringify({ voiceiqCallId, agentId: agentName }) });
+    return;
+  }
+
+  emit.prospectSpeaking({ callId: voiceiqCallId, speech: speechText });
+
+  const aiResponse = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: speechText });
+  emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
+
+  const audioUrl = await buildAudioUrl(aiResponse.speech, agentName);
+
+  // Prospect asked to be removed from calling list
+  if (aiResponse.doNotCall) {
+    await teams.playAudioPrompt({ teamsCallId, audioUrl });
+    setTimeout(() => teams.endCall(teamsCallId).catch(() => {}), 5000);
+    return;
+  }
+
+  // Transfer to human agent
+  if (aiResponse.transferred) {
+    await teams.playAudioPrompt({ teamsCallId, audioUrl });
+    if (process.env.TEAMS_TRANSFER_USER_ID) {
+      await teams.transferCallToHuman({ teamsCallId, targetUserId: process.env.TEAMS_TRANSFER_USER_ID });
+    } else {
+      setTimeout(() => teams.endCall(teamsCallId).catch(() => {}), 5000);
+    }
+    emit.callTransferred({ callId: voiceiqCallId, teamsCallId });
+    return;
+  }
+
+  // Continue conversation — play response and listen again
+  await teams.recognizeAsync({
+    teamsCallId,
+    audioUrl,
+    clientContext: JSON.stringify({ voiceiqCallId, agentId: agentName }),
+  });
 }
 
 // ─── Microsoft Graph Change Notifications validation ──────────────────────

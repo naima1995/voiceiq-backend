@@ -181,7 +181,6 @@ async function sendDtmf({ teamsCallId, tones }) {
 }
 
 // ─── Play Audio Prompt via Graph ──────────────────────────────────────────
-// Used when we need to inject pre-recorded audio rather than realtime TTS
 async function playAudioPrompt({ teamsCallId, audioUrl }) {
   const client = await getGraphClient();
   await client.api(`/communications/calls/${teamsCallId}/playPrompt`).post({
@@ -197,6 +196,39 @@ async function playAudioPrompt({ teamsCallId, audioUrl }) {
     ],
     clientContext: uuidv4(),
   });
+}
+
+// ─── Play audio AND listen for speech response ────────────────────────────
+// Plays the prompt then immediately starts recognising what the caller says.
+// Result comes back as a recognizeCompleted webhook event.
+async function recognizeAsync({ teamsCallId, audioUrl, clientContext }) {
+  const client = await getGraphClient();
+
+  await client.api(`/communications/calls/${teamsCallId}/recognizeAsync`).post({
+    clientContext: clientContext || uuidv4(),
+    prompt: {
+      '@odata.type': '#microsoft.graph.mediaPrompt',
+      mediaInfo: {
+        '@odata.type': '#microsoft.graph.mediaInfo',
+        uri: audioUrl,
+        resourceId: uuidv4(),
+      }
+    },
+    recognizeRequests: [
+      {
+        '@odata.type': '#microsoft.graph.speechRecognitionConfig',
+        speechLanguage: 'en-GB',
+      }
+    ],
+    bargeInAllowed: false,
+    initialSilenceTimeoutInSeconds: 10,
+    maxSilenceTimeoutInSeconds: 3,
+    maxRecordDurationInSeconds: 60,
+    playBeep: false,
+    stopTones: [],
+  });
+
+  logger.info('Teams recognizeAsync initiated', { teamsCallId });
 }
 
 // ─── OAuth Flow (delegated — user-level scopes only) ─────────────────────
@@ -234,6 +266,7 @@ module.exports = {
   getCallRecord,
   sendDtmf,
   playAudioPrompt,
+  recognizeAsync,
   listTeamsNumbers,
   getOAuthUrl,
   handleOAuthCallback,
