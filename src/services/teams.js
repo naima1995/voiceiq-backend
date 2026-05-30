@@ -91,6 +91,10 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
         applicationInstance: {
           '@odata.type': '#microsoft.graph.identity',
           displayName: 'VoiceIQ',
+          // Must be the Object ID of the Teams resource account (Online Application Instance)
+          // — NOT the Azure Bot Service object ID.
+          // Find it at: Entra ID > Enterprise Applications > [app] > Object ID
+          // OR via GET /api/teams/app-info diagnostic endpoint.
           id: process.env.AZURE_BOT_OBJECT_ID,
         },
       },
@@ -111,7 +115,8 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
     mediaConfig: {
       '@odata.type': '#microsoft.graph.serviceHostedMediaConfig',
     },
-    tenantId: process.env.AZURE_TENANT_ID,
+    // Note: tenantId is intentionally omitted — it is not valid for outbound call creation
+    // and was causing error 8523.
     clientContext,
   };
 
@@ -259,6 +264,44 @@ async function recognizeAsync({ teamsCallId, audioUrl, clientContext }) {
   logger.info('Teams recognizeAsync initiated', { teamsCallId });
 }
 
+// ─── Diagnostic: find the correct Object IDs for this app ────────────────
+// Helps verify AZURE_BOT_OBJECT_ID is the right value
+async function getAppInfo() {
+  const client = await getGraphClient();
+  const info = {
+    clientId:         process.env.AZURE_CLIENT_ID,
+    tenantId:         process.env.AZURE_TENANT_ID,
+    currentBotObjId:  process.env.AZURE_BOT_OBJECT_ID,
+  };
+
+  // Service principal (Enterprise Application) object ID for this app
+  try {
+    const sp = await client
+      .api('/servicePrincipals')
+      .filter(`appId eq '${process.env.AZURE_CLIENT_ID}'`)
+      .select('id,displayName,appId')
+      .get();
+    info.servicePrincipal = sp.value?.[0] || null;
+    info.spIdMatchesBotObjId = sp.value?.[0]?.id === process.env.AZURE_BOT_OBJECT_ID;
+  } catch (e) {
+    info.servicePrincipalError = e.message;
+  }
+
+  // Teams resource accounts (virtual users) — require User.Read.All
+  try {
+    const ra = await client
+      .api('/users')
+      .filter('isResourceAccount eq true')
+      .select('id,displayName,userPrincipalName')
+      .get();
+    info.resourceAccounts = ra.value || [];
+  } catch (e) {
+    info.resourceAccountsError = e.message;
+  }
+
+  return info;
+}
+
 // ─── OAuth Flow (delegated — user-level scopes only) ─────────────────────
 // Calls.Initiate.All / Calls.AccessMedia.All are app-only permissions —
 // they are granted via admin consent, not via user OAuth.
@@ -298,4 +341,5 @@ module.exports = {
   listTeamsNumbers,
   getOAuthUrl,
   handleOAuthCallback,
+  getAppInfo,
 };

@@ -20,6 +20,19 @@ router.get('/status', async (req, res) => {
   }
 });
 
+// ─── Diagnostic: verify Object IDs and resource accounts ─────────────────
+// GET /api/teams/app-info
+// Returns the service principal Object ID (what AZURE_BOT_OBJECT_ID should be)
+// and any Teams resource accounts found in the tenant.
+router.get('/app-info', async (req, res) => {
+  try {
+    const info = await teams.getAppInfo();
+    res.json(info);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Get Microsoft OAuth sign-in URL (delegated permissions) ─────────────
 router.get('/oauth/url', async (req, res) => {
   try {
