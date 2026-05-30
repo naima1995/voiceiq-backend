@@ -155,8 +155,16 @@ router.post('/teams/call-events', async (req, res) => {
 });
 
 // ─── Parse voiceiq context from clientContext field ───────────────────────
+// Supports both compact {v, a} and legacy {voiceiqCallId, agentId} shapes
 function parseCtx(clientContext) {
-  try { return JSON.parse(clientContext || '{}'); } catch { return {}; }
+  try {
+    const c = JSON.parse(clientContext || '{}');
+    return {
+      voiceiqCallId: c.voiceiqCallId || c.v,
+      agentId:       c.agentId       || c.a,
+      leadData:      c.leadData      || {},
+    };
+  } catch { return {}; }
 }
 
 // ─── Build a public audio URL from ElevenLabs buffer ─────────────────────

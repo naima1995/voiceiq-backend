@@ -72,16 +72,24 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
   const client = await getGraphClient();
   const callId = uuidv4();
 
+  // clientContext is passed through every webhook callback so we can
+  // correlate events back to our session. Max 256 chars — keep it compact.
+  const clientContext = JSON.stringify({ v: callId, a: agentId });
+
   const callPayload = {
     '@odata.type': '#microsoft.graph.call',
     callbackUri: `${process.env.CALLBACK_BASE_URL}/api/webhooks/teams/call-events`,
+    tenantId: process.env.AZURE_TENANT_ID,
+    // source uses applicationInstance (bot identity) — phone identity is
+    // only valid for the target (the person being called).
     source: {
       '@odata.type': '#microsoft.graph.participantInfo',
       identity: {
         '@odata.type': '#microsoft.graph.communicationsIdentitySet',
-        phone: {
+        applicationInstance: {
           '@odata.type': '#microsoft.graph.identity',
-          id: fromNumber || process.env.TEAMS_PHONE_NUMBER
+          displayName: 'VoiceIQ',
+          id: process.env.AZURE_BOT_OBJECT_ID || process.env.AZURE_CLIENT_ID,
         }
       }
     },
@@ -102,15 +110,7 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
       '@odata.type': '#microsoft.graph.serviceHostedMediaConfig',
       preFetchMedia: []
     },
-    // Custom context passed through for our webhook handler
-    clientContext: JSON.stringify({
-      voiceiqCallId: callId,
-      agentId,
-      leadData: {
-        name: leadData?.name,
-        company: leadData?.company,
-      }
-    })
+    clientContext,
   };
 
   logger.info('Initiating Teams outbound call', { toNumber, callId, agentId });
