@@ -10,9 +10,19 @@ router.get('/oauth/url', (req, res) => {
 });
 
 router.get('/oauth/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, error } = req.query;
+  if (error) return res.status(400).json({ error });
+
   const tokens = await calendar.handleOAuthCallback(code);
-  res.json({ connected: true, hasRefreshToken: !!tokens.refresh_token, tokens });
+  res.json({
+    connected: true,
+    hasRefreshToken: !!tokens.refresh_token,
+    // Copy refresh_token into Railway → GOOGLE_REFRESH_TOKEN to persist across restarts
+    refresh_token: tokens.refresh_token || null,
+    message: tokens.refresh_token
+      ? 'Copy refresh_token into Railway variable GOOGLE_REFRESH_TOKEN'
+      : 'No refresh_token returned — revoke access at https://myaccount.google.com/permissions then re-auth',
+  });
 });
 
 // ─── Available slots ──────────────────────────────────────────────────────

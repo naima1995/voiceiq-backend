@@ -1,6 +1,19 @@
 const { google } = require('googleapis');
 const logger = require('../utils/logger');
 
+// ─── Token store — persists latest refresh token within this process ─────
+// On Railway, env vars are read-only at runtime. After a successful OAuth
+// callback the new refresh token is kept here so the process doesn't
+// immediately fall back to the stale env-var value.
+let _refreshToken = process.env.GOOGLE_REFRESH_TOKEN || null;
+
+function setRefreshToken(token) {
+  if (token) {
+    _refreshToken = token;
+    logger.info('Google refresh token updated in memory — copy to GOOGLE_REFRESH_TOKEN in Railway to persist across restarts');
+  }
+}
+
 // ─── OAuth2 Client ────────────────────────────────────────────────────────
 function getOAuthClient() {
   const client = new google.auth.OAuth2(
@@ -9,10 +22,16 @@ function getOAuthClient() {
     process.env.GOOGLE_REDIRECT_URI
   );
 
-  // Use stored refresh token (set after first OAuth flow)
-  if (process.env.GOOGLE_REFRESH_TOKEN) {
-    client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+  if (_refreshToken) {
+    client.setCredentials({ refresh_token: _refreshToken });
   }
+
+  // Keep in-memory token up to date when Google auto-refreshes the access token
+  client.on('tokens', (tokens) => {
+    if (tokens.refresh_token) {
+      setRefreshToken(tokens.refresh_token);
+    }
+  });
 
   return client;
 }
@@ -38,10 +57,20 @@ function getOAuthUrl() {
 async function handleOAuthCallback(code) {
   const client = getOAuthClient();
   const { tokens } = await client.getToken(code);
-  // Log refresh token — user must save this to .env as GOOGLE_REFRESH_TOKEN
-  logger.info('Google OAuth tokens received — save refresh_token to .env', {
-    hasRefreshToken: !!tokens.refresh_token,
-  });
+
+  if (tokens.refresh_token) {
+    setRefreshToken(tokens.refresh_token);
+    // Print clearly so it can be copied into Railway
+    logger.info('Google OAuth success — UPDATE Railway variable GOOGLE_REFRESH_TOKEN', {
+      refresh_token: tokens.refresh_token,
+    });
+  } else {
+    // Google only returns refresh_token on first consent or after revocation.
+    // If missing here, revoke access at https://myaccount.google.com/permissions
+    // and re-run the OAuth flow so Google issues a fresh token.
+    logger.warn('Google OAuth callback: no refresh_token returned. Revoke access and re-auth to get a new one.');
+  }
+
   return tokens;
 }
 
