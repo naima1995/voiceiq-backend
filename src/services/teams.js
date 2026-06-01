@@ -88,13 +88,9 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
       '@odata.type': '#microsoft.graph.participantInfo',
       identity: {
         '@odata.type': '#microsoft.graph.communicationsIdentitySet',
-        applicationInstance: {
+        user: {
           '@odata.type': '#microsoft.graph.identity',
           displayName: 'VoiceIQ',
-          // Must be the Object ID of the Teams resource account (Online Application Instance)
-          // — NOT the Azure Bot Service object ID.
-          // Find it at: Entra ID > Enterprise Applications > [app] > Object ID
-          // OR via GET /api/teams/app-info diagnostic endpoint.
           id: process.env.AZURE_BOT_OBJECT_ID,
         },
       },
@@ -247,7 +243,7 @@ async function recognizeAsync({ teamsCallId, audioUrl, clientContext }) {
         resourceId: uuidv4(),
       }
     },
-    recognizeRequests: [
+    recognizeInputs: [
       {
         '@odata.type': '#microsoft.graph.speechRecognitionConfig',
         speechLanguage: 'en-GB',

@@ -136,7 +136,13 @@ router.post('/teams/call-events', async (req, res) => {
 
   let body;
   try {
-    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    if (Buffer.isBuffer(req.body)) {
+      body = JSON.parse(req.body.toString('utf8'));
+    } else if (typeof req.body === 'string') {
+      body = JSON.parse(req.body);
+    } else {
+      body = req.body;
+    }
   } catch {
     logger.error('Teams webhook: could not parse body');
     return;
