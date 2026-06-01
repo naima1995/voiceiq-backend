@@ -39,7 +39,8 @@ async function getAppToken() {
 async function getGraphClient() {
   const token = await getAppToken();
   return Client.init({
-    authProvider: (done) => done(null, token)
+    authProvider: (done) => done(null, token),
+    defaultVersion: 'beta',
   });
 }
 
@@ -122,7 +123,7 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
   let call;
   try {
     const response = await axios.post(
-      'https://graph.microsoft.com/v1.0/communications/calls',
+      'https://graph.microsoft.com/beta/communications/calls',
       callPayload,
       {
         headers: {
