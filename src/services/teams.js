@@ -88,7 +88,7 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
       '@odata.type': '#microsoft.graph.participantInfo',
       identity: {
         '@odata.type': '#microsoft.graph.communicationsIdentitySet',
-        user: {
+        applicationInstance: {
           '@odata.type': '#microsoft.graph.identity',
           displayName: 'VoiceIQ',
           id: process.env.AZURE_BOT_OBJECT_ID,
