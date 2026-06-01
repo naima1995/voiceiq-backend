@@ -111,8 +111,7 @@ async function makeOutboundCall({ toNumber, fromNumber, callbackUrl, agentId, le
     mediaConfig: {
       '@odata.type': '#microsoft.graph.serviceHostedMediaConfig',
     },
-    // Note: tenantId is intentionally omitted — it is not valid for outbound call creation
-    // and was causing error 8523.
+    tenantId: process.env.AZURE_TENANT_ID,
     clientContext,
   };
 
