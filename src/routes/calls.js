@@ -6,7 +6,7 @@ const { updateAgentStats } = require('./agents');
 // In-memory call log — swap for PostgreSQL in production
 const callLog = [];
 
-// ─── Log a call (internal — called by teams route) ────────────────────────
+// ─── Log a call (internal — called by webhook handlers) ──────────────────
 function logCall(callData) {
   callLog.unshift({ ...callData, loggedAt: new Date().toISOString() });
   if (callLog.length > 1000) callLog.splice(1000); // Keep last 1000

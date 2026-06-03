@@ -59,7 +59,6 @@ app.use(morgan('combined', {
   stream: { write: (msg) => logger.http(msg.trim()) }
 }));
 
-app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -71,7 +70,6 @@ app.get('/health', (req, res) => {
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     integrations: {
-      teams: !!process.env.AZURE_CLIENT_ID,
       elevenlabs: !!process.env.ELEVENLABS_API_KEY,
       gemini: !!process.env.GEMINI_API_KEY,
       twilio: !!process.env.TWILIO_ACCOUNT_SID,
