@@ -23,8 +23,18 @@ router.get('/', (req, res) => {
 
 // ─── POST /api/campaigns ──────────────────────────────────────────────────
 router.post('/', (req, res) => {
-  const { name, agentId, script, dailyLimit, startDate, timezone, hoursFrom, hoursTo } = req.body;
+  const { name, agentId, script, dailyLimit, startDate, timezone, schedule } = req.body;
   if (!name) return res.status(400).json({ error: 'Campaign name is required' });
+
+  const defaultSchedule = {
+    mon: { enabled: true,  from: '08:00', to: '18:00' },
+    tue: { enabled: true,  from: '08:00', to: '18:00' },
+    wed: { enabled: true,  from: '08:00', to: '18:00' },
+    thu: { enabled: true,  from: '08:00', to: '18:00' },
+    fri: { enabled: true,  from: '08:00', to: '18:00' },
+    sat: { enabled: false, from: '09:00', to: '13:00' },
+    sun: { enabled: false, from: '10:00', to: '14:00' },
+  };
 
   const campaign = {
     id:         uuidv4(),
@@ -34,8 +44,7 @@ router.post('/', (req, res) => {
     dailyLimit: parseInt(dailyLimit) || 200,
     startDate:  startDate || new Date().toISOString().split('T')[0],
     timezone:   timezone  || 'Europe/London',
-    hoursFrom:  hoursFrom || '08:00',
-    hoursTo:    hoursTo   || '18:00',
+    schedule:   schedule  || defaultSchedule,
     status:     'draft',
     leadCount:  0,
     reached:    0,
