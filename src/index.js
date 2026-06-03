@@ -14,7 +14,8 @@ const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
 const twilioRoutes  = require('./routes/twilio');
-const leadsRoutes   = require('./routes/leads');
+const leadsRoutes     = require('./routes/leads');
+const campaignsRoutes = require('./routes/campaigns');
 const calendarRoutes = require('./routes/calendar');
 const voiceRoutes   = require('./routes/voice');
 const agentsRoutes  = require('./routes/agents');
@@ -99,7 +100,8 @@ app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
 app.use('/api/twilio',   twilioRoutes);
-app.use('/api/leads',    leadsRoutes);
+app.use('/api/leads',     leadsRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/voice',    voiceRoutes);
 app.use('/api/agents',   agentsRoutes);
