@@ -38,7 +38,7 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadD
     url:            `${base}/api/webhooks/twilio/answer?${params}`,
     statusCallback: `${base}/api/webhooks/twilio/status`,
     statusCallbackMethod: 'POST',
-    statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed', 'failed', 'no-answer', 'busy'],
+    statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed'],
   });
 
   logger.info('Twilio outbound call created', { callId, twilioSid: call.sid, toNumber, agentId });

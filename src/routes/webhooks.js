@@ -33,7 +33,8 @@ router.post('/twilio/answer', async (req, res) => {
       agentName: agentId,
     });
     const audioUrl  = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
-    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&callId=${encodeURIComponent(voiceiqCallId)}`;
+    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+    const answerUrl = `${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
 
     emit.callStarted({ callId: voiceiqCallId, twilioCallSid: CallSid, fromNumber: From, toNumber: To, agentId });
     logger.info('Twilio call answered', { voiceiqCallId, speech: aiResponse.speech });
@@ -41,7 +42,7 @@ router.post('/twilio/answer', async (req, res) => {
     res.type('text/xml').send(twiml(`
       <Play>${audioUrl}</Play>
       <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
-      <Redirect method="POST">${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}</Redirect>
+      <Redirect method="POST">${answerUrl}</Redirect>
     `));
   } catch (err) {
     logger.error('Twilio answer webhook error', { error: err.message });
@@ -55,7 +56,7 @@ router.post('/twilio/speech', async (req, res) => {
   const { SpeechResult, CallSid } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
-  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&callId=${encodeURIComponent(voiceiqCallId)}`;
+  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
 
   try {
     if (!SpeechResult) {
