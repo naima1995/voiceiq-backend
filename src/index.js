@@ -13,7 +13,6 @@ const { errorHandler } = require('./middleware/errorHandler');
 const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
-const teamsRoutes   = require('./routes/teams');
 const twilioRoutes  = require('./routes/twilio');
 const calendarRoutes = require('./routes/calendar');
 const voiceRoutes   = require('./routes/voice');
@@ -60,7 +59,6 @@ app.use(morgan('combined', {
   stream: { write: (msg) => logger.http(msg.trim()) }
 }));
 
-// Raw body needed for Microsoft webhook validation
 app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -101,7 +99,6 @@ app.use('/api/', rateLimiter);
 app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
-app.use('/api/teams',    teamsRoutes);
 app.use('/api/twilio',   twilioRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/voice',    voiceRoutes);
