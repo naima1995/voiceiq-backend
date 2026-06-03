@@ -36,18 +36,42 @@ router.post('/upload', upload.single('file'), (req, res) => {
 
     if (!rows.length) return res.status(400).json({ error: 'Excel sheet is empty' });
 
-    // Normalise column names — accept common variants
+    // Normalise column names to match the expected Excel format:
+    // Title, Fname, Lname, Phone, Address (cols), Town, Country, Postcode, Age, Life, Provider
     const normalise = (row) => {
       const r = Object.fromEntries(
         Object.entries(row).map(([k, v]) => [k.trim().toLowerCase().replace(/\s+/g, '_'), String(v).trim()])
       );
+
+      // Build full name from Title + Fname + Lname
+      const nameParts = [r.title, r.fname, r.lname].filter(Boolean);
+      const name = nameParts.join(' ') || r.name || r.full_name || r.contact_name || '';
+
+      // Build address from multiple address columns
+      const addressParts = [
+        r.address || r.address1 || r.addresses,
+        r.address2 || r.addresses2,
+        r.address3 || r.addresses3,
+        r.town,
+        r.country,
+        r.postcode || r.post_code,
+      ].filter(Boolean);
+
       return {
-        name:        r.name        || r.full_name   || r.contact_name || '',
-        phone:       r.phone       || r.phone_number || r.mobile       || r.telephone || r.number || '',
-        company:     r.company     || r.company_name || r.organisation  || '',
-        email:       r.email       || r.email_address || '',
-        notes:       r.notes       || r.note          || '',
-        importedAt:  new Date().toISOString(),
+        name,
+        title:     r.title    || '',
+        firstName: r.fname    || r.first_name || '',
+        lastName:  r.lname    || r.last_name  || '',
+        phone:     r.phone    || r.phone_number || r.mobile || r.telephone || '',
+        address:   addressParts.join(', '),
+        town:      r.town     || '',
+        country:   r.country  || '',
+        postcode:  r.postcode || r.post_code || '',
+        age:       r.age      || '',
+        life:      r.life     || '',
+        provider:  r.provider || '',
+        email:     r.email    || r.email_address || '',
+        importedAt: new Date().toISOString(),
       };
     };
 
