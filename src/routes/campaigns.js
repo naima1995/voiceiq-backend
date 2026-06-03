@@ -23,16 +23,19 @@ router.get('/', (req, res) => {
 
 // ─── POST /api/campaigns ──────────────────────────────────────────────────
 router.post('/', (req, res) => {
-  const { name, agentId, script, dailyLimit, startDate } = req.body;
+  const { name, agentId, script, dailyLimit, startDate, timezone, hoursFrom, hoursTo } = req.body;
   if (!name) return res.status(400).json({ error: 'Campaign name is required' });
 
   const campaign = {
     id:         uuidv4(),
     name,
-    agentId:    agentId || 'james',
-    script:     script  || '',
+    agentId:    agentId   || 'james',
+    script:     script    || '',
     dailyLimit: parseInt(dailyLimit) || 200,
     startDate:  startDate || new Date().toISOString().split('T')[0],
+    timezone:   timezone  || 'Europe/London',
+    hoursFrom:  hoursFrom || '08:00',
+    hoursTo:    hoursTo   || '18:00',
     status:     'draft',
     leadCount:  0,
     reached:    0,
