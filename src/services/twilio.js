@@ -1,7 +1,8 @@
 const twilio         = require('twilio');
 const { v4: uuidv4 } = require('uuid');
 const logger         = require('../utils/logger');
-const normalisePhone = require('../utils/normalisePhone');
+const normalisePhone    = require('../utils/normalisePhone');
+const { validatePhone } = require('../utils/normalisePhone');
 
 let client = null;
 
@@ -23,8 +24,13 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadD
   const callId = uuidv4();
   const from   = fromNumber || process.env.TWILIO_PHONE_NUMBER;
 
-  // Normalise to E.164 — add +44 if UK number missing country code
+  // Normalise then validate — reject if not a UK mobile (+447...)
   toNumber = normalisePhone(toNumber);
+  const validation = validatePhone(toNumber);
+  if (!validation.valid) {
+    throw new Error(`Invalid phone number: ${validation.reason}`);
+  }
+  toNumber = validation.number;
 
   if (!from) throw new Error('No from number — set TWILIO_PHONE_NUMBER in Railway Variables');
 

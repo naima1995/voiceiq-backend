@@ -3,7 +3,8 @@ const router         = express.Router();
 const multer         = require('multer');
 const XLSX           = require('xlsx');
 const logger         = require('../utils/logger');
-const normalisePhone = require('../utils/normalisePhone');
+const normalisePhone             = require('../utils/normalisePhone');
+const { validatePhone }          = require('../utils/normalisePhone');
 
 // ─── Multer — in-memory storage (no disk writes) ──────────────────────────
 const upload = multer({
@@ -76,25 +77,46 @@ router.post('/upload', upload.single('file'), (req, res) => {
       };
     };
 
-    const leads = rows.map(normalise).filter(l => l.phone); // require phone number
-    const skipped = rows.length - leads.length;
+    const validLeads   = [];
+    const skippedRows  = [];
 
-    // Store leads
-    leadsStore.push(...leads);
+    rows.forEach((row, i) => {
+      const lead = normalise(row);
+      const rawPhone = row.phone || row.Phone || row.PHONE ||
+                       row.phone_number || row.mobile || row.telephone || '';
+
+      if (!rawPhone || !String(rawPhone).trim()) {
+        skippedRows.push({ row: i + 2, reason: 'No phone number provided' });
+        return;
+      }
+
+      const validation = validatePhone(rawPhone);
+
+      if (!validation.valid) {
+        skippedRows.push({ row: i + 2, name: lead.name || '', phone: String(rawPhone), reason: validation.reason });
+        return;
+      }
+
+      lead.phone = validation.number; // store normalised E.164
+      validLeads.push(lead);
+    });
+
+    leadsStore.push(...validLeads);
 
     logger.info('Leads uploaded from Excel', {
-      file:    req.file.originalname,
-      total:   rows.length,
-      imported: leads.length,
-      skipped,
+      file:     req.file.originalname,
+      total:    rows.length,
+      imported: validLeads.length,
+      skipped:  skippedRows.length,
     });
 
     res.json({
       success:  true,
-      imported: leads.length,
-      skipped,
+      imported: validLeads.length,
+      skipped:  skippedRows.length,
       total:    rows.length,
-      leads:    leads.slice(0, 5), // preview first 5
+      skippedDetails: skippedRows.slice(0, 20), // show up to 20 skipped
+      leads:    validLeads.slice(0, 5),          // preview first 5 valid
     });
   } catch (err) {
     logger.error('Excel parse error', { error: err.message });
