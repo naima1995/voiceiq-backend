@@ -14,6 +14,7 @@ const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
 const twilioRoutes  = require('./routes/twilio');
+const authRoutes      = require('./routes/auth');
 const leadsRoutes     = require('./routes/leads');
 const campaignsRoutes = require('./routes/campaigns');
 const calendarRoutes = require('./routes/calendar');
@@ -91,6 +92,9 @@ app.get('/api/calendar/oauth/callback', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Auth (public — no rate limit) ───────────────────────────────────────
+app.use('/api/auth', authRoutes);
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────
 app.use('/api/', rateLimiter);
