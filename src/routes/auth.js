@@ -61,31 +61,38 @@ router.get('/me', (req, res) => {
   }
 });
 
-// ─── POST /api/auth/google — verify Google ID token ──────────────────────
+// ─── POST /api/auth/google — verify Google access token via tokeninfo ────
 router.post('/google', async (req, res) => {
-  const { credential } = req.body;
-  if (!credential) return res.status(400).json({ error: 'Google credential required' });
-
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) return res.status(500).json({ error: 'GOOGLE_CLIENT_ID not configured' });
+  const { accessToken } = req.body;
+  if (!accessToken) return res.status(400).json({ error: 'Google access token required' });
 
   try {
-    const client  = new OAuth2Client(clientId);
-    const ticket  = await client.verifyIdToken({ idToken: credential, audience: clientId });
-    const payload = ticket.getPayload();
+    // Verify token and get user info via Google's userinfo endpoint
+    const response = await fetch(
+      `https://www.googleapis.com/oauth2/v3/userinfo`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
 
-    const email = payload.email;
-    const name  = payload.name  || email.split('@')[0];
-    const picture = payload.picture || null;
+    if (!response.ok) throw new Error('Failed to verify Google token');
 
-    // Check against allowed emails list (comma-separated env var)
-    // Also allow the ADMIN_EMAIL as a fallback
+    const info    = await response.json();
+    const email   = info.email;
+    const name    = info.name    || email.split('@')[0];
+    const picture = info.picture || null;
+
+    if (!info.email_verified) {
+      return res.status(401).json({ error: 'Google account email is not verified' });
+    }
+
+    // Check allowed emails
     const allowedRaw  = process.env.ALLOWED_EMAILS || process.env.ADMIN_EMAIL || '';
     const allowedList = allowedRaw.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
     if (allowedList.length > 0 && !allowedList.includes(email.toLowerCase())) {
-      logger.warn('Google login rejected — email not in allowed list', { email });
-      return res.status(403).json({ error: `Access denied. ${email} is not authorised to use VoiceIQ.` });
+      logger.warn('Google login rejected — not in allowed list', { email });
+      return res.status(403).json({
+        error: `Access denied. ${email} is not authorised to access VoiceIQ.`,
+      });
     }
 
     const token = jwt.sign(
@@ -99,7 +106,7 @@ router.post('/google', async (req, res) => {
 
   } catch (err) {
     logger.warn('Google token verification failed', { error: err.message });
-    res.status(401).json({ error: 'Invalid Google token' });
+    res.status(401).json({ error: 'Google sign-in failed. Please try again.' });
   }
 });
 
