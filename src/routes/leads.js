@@ -1,8 +1,9 @@
-const express = require('express');
-const router  = express.Router();
-const multer  = require('multer');
-const XLSX    = require('xlsx');
-const logger  = require('../utils/logger');
+const express        = require('express');
+const router         = express.Router();
+const multer         = require('multer');
+const XLSX           = require('xlsx');
+const logger         = require('../utils/logger');
+const normalisePhone = require('../utils/normalisePhone');
 
 // ─── Multer — in-memory storage (no disk writes) ──────────────────────────
 const upload = multer({
@@ -62,7 +63,7 @@ router.post('/upload', upload.single('file'), (req, res) => {
         title:     r.title    || '',
         firstName: r.fname    || r.first_name || '',
         lastName:  r.lname    || r.last_name  || '',
-        phone:     r.phone    || r.phone_number || r.mobile || r.telephone || '',
+        phone:     normalisePhone(r.phone || r.phone_number || r.mobile || r.telephone || ''),
         address:   addressParts.join(', '),
         town:      r.town     || '',
         country:   r.country  || '',

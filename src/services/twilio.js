@@ -1,6 +1,7 @@
-const twilio = require('twilio');
+const twilio         = require('twilio');
 const { v4: uuidv4 } = require('uuid');
-const logger = require('../utils/logger');
+const logger         = require('../utils/logger');
+const normalisePhone = require('../utils/normalisePhone');
 
 let client = null;
 
@@ -18,9 +19,12 @@ function getClient() {
 
 // ─── Make outbound call ───────────────────────────────────────────────────
 async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadData = {} }) {
-  const c    = getClient();
+  const c      = getClient();
   const callId = uuidv4();
-  const from = fromNumber || process.env.TWILIO_PHONE_NUMBER;
+  const from   = fromNumber || process.env.TWILIO_PHONE_NUMBER;
+
+  // Normalise to E.164 — add +44 if UK number missing country code
+  toNumber = normalisePhone(toNumber);
 
   if (!from) throw new Error('No from number — set TWILIO_PHONE_NUMBER in Railway Variables');
 
