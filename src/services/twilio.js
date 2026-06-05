@@ -38,8 +38,18 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadD
   const params = new URLSearchParams({
     agentId,
     callId,
-    leadName:    leadData.name    || '',
-    leadCompany: leadData.company || '',
+    leadName:    leadData.name      || '',
+    leadCompany: leadData.company   || '',
+    leadFname:   leadData.fname     || '',
+    leadLname:   leadData.lname     || '',
+    leadDob:     leadData.dob       || leadData.age || '',
+    leadPhone:   toNumber,
+    leadAddr1:   leadData.address   || '',
+    leadAddr2:   leadData.address2  || '',
+    leadAddr3:   leadData.address3  || '',
+    leadTown:    leadData.town      || '',
+    leadCountry: leadData.country   || '',
+    leadPost:    leadData.postcode  || '',
   });
 
   const call = await c.calls.create({

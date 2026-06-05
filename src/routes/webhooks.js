@@ -15,7 +15,13 @@ function twiml(inner) {
 
 // ─── Twilio: call answered — generate greeting, start AI session ──────────
 router.post('/twilio/answer', async (req, res) => {
-  const { agentId = 'james', callId, leadName = '', leadCompany = '' } = req.query;
+  const {
+    agentId = 'james', callId,
+    leadName = '', leadCompany = '',
+    leadFname = '', leadLname = '', leadDob = '', leadPhone = '',
+    leadAddr1 = '', leadAddr2 = '', leadAddr3 = '',
+    leadTown = '', leadCountry = '', leadPost = '',
+  } = req.query;
   const { CallSid, From, To } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
@@ -24,7 +30,21 @@ router.post('/twilio/answer', async (req, res) => {
     gemini.startSession({
       callId: voiceiqCallId,
       agentConfig: { name: agentId, companyName: process.env.COMPANY_NAME || 'VoiceIQ' },
-      leadData: { name: leadName, company: leadCompany, phoneNumber: From },
+      leadData: {
+        name:        leadName,
+        company:     leadCompany,
+        fname:       leadFname,
+        lname:       leadLname,
+        dob:         leadDob,
+        phoneNumber: leadPhone || From,
+        address:     leadAddr1,
+        address2:    leadAddr2,
+        address3:    leadAddr3,
+        town:        leadTown,
+        country:     leadCountry,
+        postcode:    leadPost,
+        callStarted: new Date().toISOString(), // record exact call time
+      },
     });
 
     const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: null });
@@ -76,63 +96,75 @@ router.post('/twilio/speech', async (req, res) => {
 
     emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
 
-    // ── Book calendar meeting if AI confirmed booking ─────────────────────
+    // ── Create calendar task when AI confirms booking ─────────────────────
     if (aiResponse.bookMeeting && aiResponse.meetingDetails) {
-      const md = aiResponse.meetingDetails;
-      try {
-        // Resolve a concrete start time — if the AI gave a vague string like
-        // "Tuesday afternoon" we schedule 24 hrs from now as a safe fallback;
-        // a proper NLP date-resolver can be added later.
-        let startTime = md.startTime || md.preferredTime;
-        if (!startTime || isNaN(Date.parse(startTime))) {
-          // Default: next working day at 14:00 London time
-          const fallback = new Date();
-          fallback.setDate(fallback.getDate() + 1);
-          fallback.setHours(14, 0, 0, 0);
-          startTime = fallback.toISOString();
-          logger.warn('bookMeeting: vague preferredTime — using fallback slot', { voiceiqCallId, preferredTime: md.preferredTime });
-        }
+      const md      = aiResponse.meetingDetails;
+      const session = gemini.getSession(voiceiqCallId);
+      const lead    = session?.leadData || {};
 
-        const session  = gemini.getSession(voiceiqCallId);
+      try {
+        // Use the call's own start time as the task due date
+        const dueTime = lead.callStarted
+          ? new Date(lead.callStarted)
+          : new Date();
+
+        // Format date/time as UK AM/PM for the task body
+        const ukDate = dueTime.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+        const ukTime = dueTime.toLocaleTimeString('en-GB', {
+          timeZone: 'Europe/London',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }).toUpperCase(); // e.g. "02:30 PM"
+
+        // Build full address from lead fields
+        const addressParts = [
+          lead.address, lead.address2, lead.address3,
+          lead.town, lead.country, lead.postcode,
+        ].filter(Boolean);
+        const fullAddress = addressParts.join(', ') || 'Not provided';
+
         const agentName = session?.agentConfig?.name || agentId;
 
-        const booking = await calendar.bookMeeting({
-          title:         `Meeting with ${md.name || 'Prospect'}`,
-          startTime,
-          attendeeEmail: md.email,
-          attendeeName:  md.name,
-          agentName,
-          purpose:       md.purpose || 'Discovery call',
-          notes:         md.notes   || '',
-          addGoogleMeetLink: true,
+        const task = await calendar.createTask({
+          title:   `📞 Booking — ${lead.fname || md.name || 'Prospect'} ${lead.lname || ''}`.trim(),
+          dueTime: dueTime.toISOString(),
+          notes: [
+            `First Name:          ${lead.fname   || md.name?.split(' ')[0] || 'N/A'}`,
+            `Last Name:           ${lead.lname   || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
+            `DOB:                 ${lead.dob     || 'N/A'}`,
+            `Address:             ${fullAddress}`,
+            ``,
+            `Meeting/Call Date:   ${ukDate}`,
+            `Meeting/Call Time:   ${ukTime}`,
+            ``,
+            `Mobile No:           ${lead.phoneNumber || 'N/A'}`,
+            ``,
+            `Booked by Agent:     ${agentName}`,
+            `AI Notes:            ${md.notes || 'N/A'}`,
+          ].join('\n'),
         });
 
-        // Attach booking details to the session so the summary picks them up
-        if (session) {
-          session.bookingResult = booking;
-        }
+        if (session) session.bookingResult = task;
 
         emit.meetingBooked({
-          callId: voiceiqCallId,
-          eventId:   booking.eventId,
-          meetLink:  booking.meetLink,
-          htmlLink:  booking.htmlLink,
-          attendee:  md.email,
-          name:      md.name,
-          start:     booking.start,
+          callId:    voiceiqCallId,
+          taskId:    task.taskId,
+          name:      `${lead.fname || ''} ${lead.lname || ''}`.trim() || md.name,
+          date:      ukDate,
+          time:      ukTime,
+          phone:     lead.phoneNumber,
           agentName,
         });
 
-        logger.info('Calendar booking created during call', {
+        logger.info('Calendar task created during call', {
           voiceiqCallId,
-          eventId:  booking.eventId,
-          attendee: md.email,
-          start:    booking.start,
+          taskId: task.taskId,
+          name:   `${lead.fname} ${lead.lname}`,
         });
 
       } catch (bookErr) {
-        // Don't fail the call — log and continue
-        logger.error('Calendar booking failed during call', { voiceiqCallId, error: bookErr.message });
+        logger.error('Calendar task creation failed during call', { voiceiqCallId, error: bookErr.message });
       }
     }
 
@@ -192,11 +224,10 @@ router.post('/twilio/status', async (req, res) => {
       outcome:   summary?.outcome || CallStatus,
       ...(bookingResult && {
         booking: {
-          eventId:  bookingResult.eventId,
-          meetLink: bookingResult.meetLink,
-          htmlLink: bookingResult.htmlLink,
-          start:    bookingResult.start,
-          attendee: bookingResult.attendee,
+          taskId:   bookingResult.taskId   || null,
+          eventId:  bookingResult.eventId  || null,
+          htmlLink: bookingResult.htmlLink || null,
+          due:      bookingResult.due      || bookingResult.start || null,
         },
       }),
     });

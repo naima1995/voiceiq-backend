@@ -31,6 +31,7 @@ function getOAuthUrl() {
     scope: [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/tasks',
     ],
   });
 }
@@ -201,6 +202,37 @@ async function bookMeeting({
   };
 }
 
+// ─── Create a Task (appears in Google Calendar "My Tasks") ───────────────
+async function createTask({ title, dueTime, notes }) {
+  const auth   = getOAuthClient();
+  const tasks  = google.tasks({ version: 'v1', auth });
+
+  const requestBody = {
+    title,
+    notes,
+    // due must be an RFC 3339 timestamp; Tasks API ignores the time portion
+    // but we store it for reference
+    due: new Date(dueTime).toISOString(),
+    status: 'needsAction',
+  };
+
+  const response = await tasks.tasks.insert({
+    tasklist: '@default',
+    requestBody,
+  });
+
+  const created = response.data;
+  logger.info('Calendar task created', { taskId: created.id, title });
+
+  return {
+    taskId:   created.id,
+    title:    created.title,
+    due:      created.due,
+    htmlLink: created.selfLink || null,
+    status:   created.status,
+  };
+}
+
 // ─── Reschedule a Meeting ─────────────────────────────────────────────────
 async function rescheduleMeeting({ eventId, newStartTime, newEndTime, reason }) {
   const calendar = getCalendarClient();
@@ -318,6 +350,7 @@ module.exports = {
   handleOAuthCallback,
   getAvailableSlots,
   bookMeeting,
+  createTask,
   rescheduleMeeting,
   cancelMeeting,
   listUpcomingEvents,
