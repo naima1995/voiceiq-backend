@@ -127,7 +127,7 @@ router.post('/twilio/speech', async (req, res) => {
         const agentName = session?.agentConfig?.name || agentId;
 
         const task = await calendar.createTask({
-          title:   `📞 Booking — ${lead.fname || md.name || 'Prospect'} ${lead.lname || ''}`.trim(),
+          title:   `Call Reminder — ${lead.fname || md.name?.split(' ')[0] || 'Prospect'} ${lead.lname || md.name?.split(' ').slice(1).join(' ') || ''}`.trim(),
           dueTime: dueTime.toISOString(),
           notes: [
             `First Name:          ${lead.fname   || md.name?.split(' ')[0] || 'N/A'}`,
