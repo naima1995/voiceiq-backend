@@ -32,6 +32,13 @@ router.post('/book', async (req, res) => {
   res.json(result);
 });
 
+// ─── Create task ──────────────────────────────────────────────────────────
+router.post('/task', async (req, res) => {
+  const result = await calendar.createTask(req.body);
+  logger.info('Task created via API', { taskId: result.taskId });
+  res.json(result);
+});
+
 // ─── Reschedule meeting ───────────────────────────────────────────────────
 router.patch('/reschedule', async (req, res) => {
   const result = await calendar.rescheduleMeeting(req.body);
