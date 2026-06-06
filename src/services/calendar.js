@@ -204,33 +204,51 @@ async function bookMeeting({
   };
 }
 
-// ─── Create a Task (appears in Google Calendar "My Tasks") ───────────────
-async function createTask({ title, dueTime, notes }) {
-  const auth   = getOAuthClient();
-  const tasks  = google.tasks({ version: 'v1', auth });
+// ─── Create a Calendar Reminder (private event, no invites, no Meet link) ─
+async function createTask({ title, dueTime, notes, durationMins = 60 }) {
+  const calendar   = getCalendarClient();
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
 
-  const requestBody = {
-    title,
-    notes,
-    // due must be an RFC 3339 timestamp; Tasks API ignores the time portion
-    // but we store it for reference
-    due: new Date(dueTime).toISOString(),
-    status: 'needsAction',
+  const startTime = new Date(dueTime);
+  const endTime   = new Date(startTime.getTime() + durationMins * 60 * 1000);
+
+  const event = {
+    summary:     title,
+    description: notes,
+    start: {
+      dateTime: startTime.toISOString(),
+      timeZone: 'Europe/London',
+    },
+    end: {
+      dateTime: endTime.toISOString(),
+      timeZone: 'Europe/London',
+    },
+    // Private — no attendees, no invites, no Meet link
+    visibility: 'private',
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: 15 },
+        { method: 'email', minutes: 60 },
+      ],
+    },
   };
 
-  const response = await tasks.tasks.insert({
-    tasklist: '@default',
-    requestBody,
+  const response = await calendar.events.insert({
+    calendarId,
+    requestBody:  event,
+    sendUpdates:  'none', // never send emails
+    conferenceDataVersion: 0,
   });
 
   const created = response.data;
-  logger.info('Calendar task created', { taskId: created.id, title });
+  logger.info('Calendar reminder created', { eventId: created.id, title, start: startTime });
 
   return {
-    taskId:   created.id,
-    title:    created.title,
-    due:      created.due,
-    htmlLink: created.selfLink || null,
+    taskId:   created.id,   // keep field name so webhooks.js needs no change
+    title:    created.summary,
+    due:      created.start.dateTime,
+    htmlLink: created.htmlLink || null,
     status:   created.status,
   };
 }
