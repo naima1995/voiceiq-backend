@@ -52,6 +52,28 @@ async function parseFile(buffer, originalname) {
   throw new Error(`Cannot parse file type: ${ext}`);
 }
 
+// ─── Webpage fetcher ─────────────────────────────────────────────────────
+async function fetchWebpage(url) {
+  const axios = require('axios');
+  const res = await axios.get(url, {
+    timeout: 10000,
+    headers: { 'User-Agent': 'VoiceIQ-KnowledgeBot/1.0' },
+    maxContentLength: 5 * 1024 * 1024,
+  });
+  // Strip HTML tags and collapse whitespace
+  const text = res.data
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s{2,}/g, '\n')
+    .trim();
+  return text;
+}
+
 // ─── GET /api/knowledge — list all ───────────────────────────────────────
 router.get('/', (req, res) => {
   const list = knowledgeBases.map(({ content, ...rest }) => rest); // omit full content from list
@@ -65,37 +87,62 @@ router.get('/:id', (req, res) => {
   res.json(kb);
 });
 
-// ─── POST /api/knowledge — create ────────────────────────────────────────
+// ─── POST /api/knowledge — create (file / text / url) ────────────────────
 router.post('/', upload.single('file'), async (req, res) => {
-  const { name, agentId, description } = req.body;
+  const { name, agentId, description, type = 'file', textContent, url } = req.body;
 
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
-  if (!req.file)     return res.status(400).json({ error: 'File is required' });
 
   let content = '';
+  let fileName = null;
+  let fileType = null;
+  let fileSize = null;
+
   try {
-    content = await parseFile(req.file.buffer, req.file.originalname);
-  } catch (parseErr) {
-    return res.status(422).json({ error: `File parse failed: ${parseErr.message}` });
+    if (type === 'file') {
+      if (!req.file) return res.status(400).json({ error: 'File is required' });
+      content  = await parseFile(req.file.buffer, req.file.originalname);
+      fileName = req.file.originalname;
+      fileType = path.extname(req.file.originalname).toLowerCase().replace('.', '').toUpperCase();
+      fileSize = req.file.size;
+
+    } else if (type === 'text') {
+      if (!textContent?.trim()) return res.status(400).json({ error: 'Content is required' });
+      content  = textContent.trim();
+      fileName = 'Written content';
+      fileType = 'TEXT';
+
+    } else if (type === 'url') {
+      if (!url?.trim()) return res.status(400).json({ error: 'URL is required' });
+      content  = await fetchWebpage(url.trim());
+      fileName = url.trim();
+      fileType = 'URL';
+
+    } else {
+      return res.status(400).json({ error: `Unknown type: ${type}` });
+    }
+  } catch (err) {
+    return res.status(422).json({ error: `Content processing failed: ${err.message}` });
   }
 
   const kb = {
     id:          nextId++,
     name:        name.trim(),
     description: description?.trim() || '',
-    agentId:     agentId || null,    // null = not assigned to a specific agent
-    fileName:    req.file.originalname,
-    fileType:    path.extname(req.file.originalname).toLowerCase().replace('.', '').toUpperCase(),
-    fileSize:    req.file.size,
+    agentId:     agentId || null,
+    type:        type,
+    fileName,
+    fileType,
+    fileSize:    fileSize || null,
     charCount:   content.length,
     content,
     createdAt:   new Date().toISOString(),
   };
 
   knowledgeBases.unshift(kb);
-  logger.info('Knowledge base created', { id: kb.id, name: kb.name, agentId, chars: content.length });
+  logger.info('Knowledge base created', { id: kb.id, name: kb.name, type, agentId, chars: content.length });
 
-  const { content: _, ...response } = kb; // don't return full content on create
+  const { content: _, ...response } = kb;
   res.status(201).json(response);
 });
 
