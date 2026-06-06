@@ -23,6 +23,7 @@ const voiceRoutes   = require('./routes/voice');
 const agentsRoutes  = require('./routes/agents');
 const callsRoutes   = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
+const knowledgeRoutes = require('./routes/knowledge');
 
 const app = express();
 app.set('trust proxy', 1); // Required for Railway/reverse proxy
@@ -112,6 +113,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/voice',    voiceRoutes);
 app.use('/api/agents',   agentsRoutes);
 app.use('/api/calls',    callsRoutes);
+app.use('/api/knowledge', knowledgeRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────
 app.use((req, res) => {

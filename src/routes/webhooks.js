@@ -5,6 +5,7 @@ const elevenlabs = require('../services/elevenlabs');
 const calendar = require('../services/calendar');
 const { emit } = require('../services/websocket');
 const { logCall } = require('./calls');
+const { getKnowledgeForAgent } = require('./knowledge');
 const logger = require('../utils/logger');
 const audioCache = require('../utils/audioCache');
 
@@ -27,9 +28,12 @@ router.post('/twilio/answer', async (req, res) => {
   const base = process.env.CALLBACK_BASE_URL;
 
   try {
+    // Load knowledge base content assigned to this agent
+    const faqContext = getKnowledgeForAgent(agentId);
+
     gemini.startSession({
       callId: voiceiqCallId,
-      agentConfig: { name: agentId, companyName: process.env.COMPANY_NAME || 'VoiceIQ' },
+      agentConfig: { name: agentId, companyName: process.env.COMPANY_NAME || 'VoiceIQ', faqContext },
       leadData: {
         name:        leadName,
         company:     leadCompany,
