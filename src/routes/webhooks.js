@@ -103,19 +103,29 @@ router.post('/twilio/speech', async (req, res) => {
       const lead    = session?.leadData || {};
 
       try {
-        // Use the call's own start time as the task due date
-        const dueTime = lead.callStarted
-          ? new Date(lead.callStarted)
-          : new Date();
+        // Time of the original call (when agent spoke to client)
+        const callTime = lead.callStarted ? new Date(lead.callStarted) : new Date();
 
-        // Format date/time as UK AM/PM for the task body
-        const ukDate = dueTime.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
-        const ukTime = dueTime.toLocaleTimeString('en-GB', {
+        // Format helper — UK date DD/MM/YYYY and time HH:MM AM/PM
+        const toUKDate = (d) => d.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+        const toUKTime = (d) => d.toLocaleTimeString('en-GB', {
           timeZone: 'Europe/London',
           hour: '2-digit',
           minute: '2-digit',
           hour12: true,
-        }).toUpperCase(); // e.g. "02:30 PM"
+        }).toUpperCase();
+
+        // Resolve callback/meeting time — prefer AI-extracted time, fall back to call time
+        let callbackTime = callTime;
+        const rawPreferred = md.startTime || md.preferredTime;
+        if (rawPreferred && !isNaN(Date.parse(rawPreferred))) {
+          callbackTime = new Date(rawPreferred);
+        }
+
+        const callDateStr     = toUKDate(callTime);
+        const callTimeStr     = toUKTime(callTime);
+        const callbackDateStr = toUKDate(callbackTime);
+        const callbackTimeStr = toUKTime(callbackTime);
 
         // Build full address from lead fields
         const addressParts = [
@@ -128,15 +138,17 @@ router.post('/twilio/speech', async (req, res) => {
 
         const task = await calendar.createTask({
           title:   `Call Reminder — ${lead.fname || md.name?.split(' ')[0] || 'Prospect'} ${lead.lname || md.name?.split(' ').slice(1).join(' ') || ''}`.trim(),
-          dueTime: dueTime.toISOString(),
+          dueTime: callbackTime.toISOString(),
           notes: [
+            `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back at the time ${callbackTimeStr}.`,
+            ``,
             `First Name:          ${lead.fname   || md.name?.split(' ')[0] || 'N/A'}`,
             `Last Name:           ${lead.lname   || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
             `DOB:                 ${lead.dob     || 'N/A'}`,
             `Address:             ${fullAddress}`,
             ``,
-            `Meeting/Call Date:   ${ukDate}`,
-            `Meeting/Call Time:   ${ukTime}`,
+            `Meeting/Call Date:   ${callbackDateStr}`,
+            `Meeting/Call Time:   ${callbackTimeStr}`,
             ``,
             `Mobile No:           ${lead.phoneNumber || 'N/A'}`,
             ``,
