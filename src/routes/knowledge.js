@@ -13,7 +13,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.docx', '.txt', '.xlsx', '.xls', '.csv'];
+    const allowed = ['.pdf', '.docx', '.txt', '.xlsx', '.xls', '.csv', '.mp3', '.mp4', '.wav', '.m4a', '.ogg', '.webm'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) return cb(null, true);
     cb(new Error(`Unsupported file type: ${ext}. Allowed: ${allowed.join(', ')}`));
@@ -117,6 +117,14 @@ router.post('/', upload.single('file'), async (req, res) => {
       content  = await fetchWebpage(url.trim());
       fileName = url.trim();
       fileType = 'URL';
+
+    } else if (type === 'media') {
+      if (!req.file) return res.status(400).json({ error: 'Media file is required' });
+      // Store filename + placeholder — transcription can be wired to Whisper API later
+      content  = `[Media file uploaded: ${req.file.originalname}]\n\nTranscription pending. File size: ${(req.file.size / 1024).toFixed(1)} KB.\n\nTo enable automatic transcription, connect a Whisper or Google Speech-to-Text API key in Settings.`;
+      fileName = req.file.originalname;
+      fileType = path.extname(req.file.originalname).toLowerCase().replace('.', '').toUpperCase();
+      fileSize = req.file.size;
 
     } else {
       return res.status(400).json({ error: `Unknown type: ${type}` });
