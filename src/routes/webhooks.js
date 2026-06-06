@@ -115,11 +115,27 @@ router.post('/twilio/speech', async (req, res) => {
           hour12: true,
         }).toUpperCase();
 
-        // Resolve callback/meeting time — prefer AI-extracted time, fall back to call time
-        let callbackTime = callTime;
+        // Resolve callback/meeting time — prefer AI-extracted time, fall back to next day 14:00
+        let callbackTime = null;
         const rawPreferred = md.startTime || md.preferredTime;
         if (rawPreferred && !isNaN(Date.parse(rawPreferred))) {
           callbackTime = new Date(rawPreferred);
+        }
+
+        // Safety net — never book same-day; push to next working day at 14:00 if needed
+        const today = new Date(callTime);
+        today.setHours(0, 0, 0, 0);
+        if (!callbackTime || callbackTime <= today) {
+          // Find next working day (skip Saturday/Sunday)
+          const nextDay = new Date(callTime);
+          nextDay.setDate(nextDay.getDate() + 1);
+          nextDay.setHours(14, 0, 0, 0);
+          if (nextDay.getDay() === 6) nextDay.setDate(nextDay.getDate() + 2); // skip Saturday
+          if (nextDay.getDay() === 0) nextDay.setDate(nextDay.getDate() + 1); // skip Sunday
+          callbackTime = nextDay;
+          logger.warn('Same-day booking blocked — pushed to next working day', {
+            voiceiqCallId, original: rawPreferred, rescheduled: callbackTime,
+          });
         }
 
         const callDateStr     = toUKDate(callTime);
