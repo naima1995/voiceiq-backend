@@ -25,9 +25,10 @@ function set(key, value) {
 
 function getCalendarConfig() {
   return {
-    // Only report as "connected" if the user explicitly linked via UI
-    connected:  store.googleConnectedViaUI,
-    email:      store.googleEmail,
+    // Connected if token exists from any source (env var or UI OAuth flow)
+    connected:  !!store.googleRefreshToken,
+    // Email only shown when explicitly linked via UI OAuth flow
+    email:      store.googleConnectedViaUI ? store.googleEmail : null,
     calendarId: store.googleCalendarId,
   };
 }
