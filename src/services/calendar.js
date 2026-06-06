@@ -29,7 +29,7 @@ function getOAuthUrl() {
   const client = getOAuthClient();
   return client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'select_account consent', // always show account picker, then consent
     scope: [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
