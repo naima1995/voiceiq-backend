@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const logger = require('../utils/logger');
+const configStore = require('../utils/configStore');
 
 // ─── OAuth2 Client ────────────────────────────────────────────────────────
 function getOAuthClient() {
@@ -9,9 +10,10 @@ function getOAuthClient() {
     process.env.GOOGLE_REDIRECT_URI
   );
 
-  // Use stored refresh token (set after first OAuth flow)
-  if (process.env.GOOGLE_REFRESH_TOKEN) {
-    client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+  // Use runtime config store (updated via OAuth UI flow)
+  const refreshToken = configStore.get('googleRefreshToken');
+  if (refreshToken) {
+    client.setCredentials({ refresh_token: refreshToken });
   }
 
   return client;
