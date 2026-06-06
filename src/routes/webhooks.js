@@ -156,7 +156,7 @@ router.post('/twilio/speech', async (req, res) => {
           title:   `Call Reminder — ${lead.fname || md.name?.split(' ')[0] || 'Prospect'} ${lead.lname || md.name?.split(' ').slice(1).join(' ') || ''}`.trim(),
           dueTime: callbackTime.toISOString(),
           notes: [
-            `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back at the time ${callbackTimeStr}.`,
+            `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back on ${callbackDateStr} at ${callbackTimeStr}.`,
             ``,
             `First Name:          ${lead.fname   || md.name?.split(' ')[0] || 'N/A'}`,
             `Last Name:           ${lead.lname   || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
