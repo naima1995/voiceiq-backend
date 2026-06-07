@@ -4,8 +4,72 @@ const multer   = require('multer');
 const path     = require('path');
 const logger   = require('../utils/logger');
 
+// ─── NATO Phonetic Alphabet — built-in KB entry ───────────────────────────
+const PHONETIC_ALPHABET_CONTENT = `PHONETIC ALPHABET — USE WHEN CONFIRMING POSTCODES, NAMES, OR REFERENCE NUMBERS
+
+When spelling out any letter to a client on the phone, always use the NATO phonetic word alongside it.
+Format: say the letter, then say "for [phonetic word]".
+
+Example postcode E17 6TF:
+→ "That's E for Echo, one seven, six, T for Tango, F for Foxtrot."
+
+Full NATO Phonetic Alphabet:
+A - Alpha
+B - Bravo
+C - Charlie
+D - Delta
+E - Echo
+F - Foxtrot
+G - Golf
+H - Hotel
+I - India
+J - Juliet
+K - Kilo
+L - Lima
+M - Mike
+N - November
+O - Oscar
+P - Papa
+Q - Quebec
+R - Romeo
+S - Sierra
+T - Tango
+U - Uniform
+V - Victor
+W - Whiskey
+X - X-ray
+Y - Yankee
+Z - Zulu
+
+NUMBERS: Always read numbers individually digit by digit unless it's a well-known format.
+- E17 6TF → "E for Echo, one seven, six, T for Tango, F for Foxtrot"
+- SW1A 2AA → "S for Sierra, W for Whiskey, one, A for Alpha, two, A for Alpha, A for Alpha"
+
+USAGE RULES:
+1. Always use phonetics when confirming a postcode with the client.
+2. Use phonetics whenever spelling a name letter by letter.
+3. Read digits individually — never group them (say "one seven", not "seventeen").
+4. After spelling out, repeat the full value back: "So that's E17 6TF — is that correct?"
+5. If the client gives you a letter that sounds ambiguous (e.g. B/P, D/T, M/N), confirm using phonetics: "Was that B for Bravo or P for Papa?"
+`;
+
 // ─── In-memory store ──────────────────────────────────────────────────────
-const knowledgeBases = [];
+const knowledgeBases = [
+  {
+    id:          1,
+    name:        'Phonetic Alphabet (Postcode Confirmation)',
+    description: 'NATO phonetic alphabet for confirming postcodes, names, and reference numbers on calls.',
+    agentId:     null,   // shared across all agents
+    type:        'text',
+    fileName:    'Built-in',
+    fileType:    'TEXT',
+    fileSize:    null,
+    charCount:   PHONETIC_ALPHABET_CONTENT.length,
+    content:     PHONETIC_ALPHABET_CONTENT,
+    builtin:     true,
+    createdAt:   new Date().toISOString(),
+  },
+];
 let nextId = 1000;
 
 // ─── Multer — memory storage, 20MB limit ─────────────────────────────────
@@ -172,6 +236,10 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const idx = knowledgeBases.findIndex(k => k.id === parseInt(req.params.id));
   if (idx === -1) return res.status(404).json({ error: 'Knowledge base not found' });
+
+  if (knowledgeBases[idx].builtin) {
+    return res.status(403).json({ error: 'Built-in knowledge bases cannot be deleted.' });
+  }
 
   const [removed] = knowledgeBases.splice(idx, 1);
   logger.info('Knowledge base deleted', { id: removed.id, name: removed.name });
