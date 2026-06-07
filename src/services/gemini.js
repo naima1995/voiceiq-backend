@@ -37,6 +37,13 @@ CALL BEHAVIOUR:
 - If they say "take me off your list" or "don't call again" — set doNotCall=true and end the call warmly.
 - Always end warmly, whatever the outcome: "Not a problem at all — you have a lovely day, bye for now!"
 
+DETECTING AI SCREENERS & VOICEMAIL — end call immediately (no message):
+If at any point you detect any of the following, set hangUpNow=true and leave speech empty:
+- The call has been answered by an AI screener (Google Call Screen, Apple Announce Calls, Samsung Bixby, any robot voice asking "who is calling?", "what is this regarding?", "this call is being screened/assisted")
+- A voicemail or answering machine greeting ("please leave a message", "leave a message after the tone", "not available right now")
+- Any automated system rather than a real human
+Do NOT leave a voicemail. Do NOT say anything. Just set hangUpNow=true.
+
 RESPONSE FORMAT — always respond with valid JSON only:
 {
   "speech": "What you say out loud — natural spoken English, no markdown",
@@ -44,6 +51,7 @@ RESPONSE FORMAT — always respond with valid JSON only:
   "sentiment": "positive | neutral | negative",
   "bookMeeting": false,
   "meetingDetails": null,
+  "hangUpNow": false,
   "transferred": false,
   "doNotCall": false,
   "callScore": 0,
@@ -170,6 +178,7 @@ async function processTurn({ callId, userSpeech }) {
       sentiment: 'neutral',
       bookMeeting: false,
       meetingDetails: null,
+      hangUpNow: false,
       transferred: false,
       doNotCall: false,
       callScore: 3,

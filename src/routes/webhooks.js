@@ -96,9 +96,65 @@ router.post('/twilio/answer', async (req, res) => {
   }
 });
 
+// ─── Twilio: AMD (Answering Machine Detection) callback ──────────────────
+// Fired async by Twilio when machineDetection result is ready.
+// If it's a machine/voicemail, end the call via REST immediately.
+router.post('/twilio/amd', async (req, res) => {
+  res.status(200).send(); // respond immediately
+  const { CallSid, AnsweredBy } = req.body;
+  // AnsweredBy values: 'human' | 'machine_start' | 'machine_end_beep' |
+  //                   'machine_end_silence' | 'machine_end_other' | 'fax' | 'unknown'
+  const isMachine = AnsweredBy && AnsweredBy.startsWith('machine');
+  const isFax     = AnsweredBy === 'fax';
+
+  if (isMachine || isFax) {
+    logger.info('AMD: machine/voicemail detected — ending call', { CallSid, AnsweredBy });
+    try {
+      const twilio = require('twilio');
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await client.calls(CallSid).update({ status: 'completed' });
+    } catch (err) {
+      logger.warn('AMD: failed to end call', { CallSid, error: err.message });
+    }
+  }
+});
+
+// ─── AI screener keyword detection ───────────────────────────────────────
+// Phrases used by Google Call Screen, Apple Announce Calls,
+// Samsung Bixby Text Call, and generic voicemail prompts.
+const AI_SCREENER_PATTERNS = [
+  // Google Call Screen
+  /who(?:'s| is) (?:calling|this)/i,
+  /what(?:'s| is) (?:this|the call) (?:regarding|about|for)/i,
+  /this call is being screened/i,
+  /google.*screen/i,
+  /can you tell me.*(?:calling|reason)/i,
+  // Apple Announce Calls / Call Screening
+  /(?:who are you|who is this|what is this regarding)/i,
+  /announce.*call/i,
+  // Samsung Bixby Text Call
+  /bixby/i,
+  /call assistant/i,
+  /text call/i,
+  /this call is being assisted/i,
+  // Generic voicemail / answering machine beep prompts
+  /please leave (?:a |your )?message/i,
+  /leave (?:a |your )?message after the (?:tone|beep)/i,
+  /not (?:available|here) right now/i,
+  /(?:record|leave) (?:a )?(?:message|voicemail)/i,
+  /speak after the (?:tone|beep)/i,
+  /no one is available/i,
+  /(?:voicemail|answering machine)/i,
+];
+
+function isAIScreenerOrVoicemail(speech) {
+  if (!speech) return false;
+  return AI_SCREENER_PATTERNS.some(pattern => pattern.test(speech));
+}
+
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
-  const { agentId = 'james', callId } = req.query;
+  const { agentId = 'rachel', callId } = req.query;
   const { SpeechResult, CallSid } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
@@ -109,6 +165,15 @@ router.post('/twilio/speech', async (req, res) => {
       return res.type('text/xml').send(twiml(`
         <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
       `));
+    }
+
+    // ── Screener / voicemail guard — hang up silently, no message ────────
+    if (isAIScreenerOrVoicemail(SpeechResult)) {
+      logger.info('AI screener or voicemail detected — ending call silently', {
+        voiceiqCallId, speech: SpeechResult,
+      });
+      gemini.endSession(voiceiqCallId);
+      return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
     emit.prospectSpeaking({ callId: voiceiqCallId, speech: SpeechResult });
@@ -221,6 +286,13 @@ router.post('/twilio/speech', async (req, res) => {
       } catch (bookErr) {
         logger.error('Calendar task creation failed during call', { voiceiqCallId, error: bookErr.message });
       }
+    }
+
+    // Gemini detected a screener/voicemail mid-call — hang up silently
+    if (aiResponse.hangUpNow) {
+      logger.info('Gemini flagged hangUpNow — ending call silently', { voiceiqCallId });
+      gemini.endSession(voiceiqCallId);
+      return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
     if (aiResponse.doNotCall) {
