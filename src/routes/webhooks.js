@@ -92,8 +92,8 @@ router.post('/twilio/answer', async (req, res) => {
 
     res.type('text/xml').send(twiml(`
       <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
-      <Redirect method="POST">${answerUrl}</Redirect>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
+      <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
     logger.error('Twilio answer webhook error', { error: err.message });
@@ -167,8 +167,11 @@ router.post('/twilio/speech', async (req, res) => {
 
   try {
     if (!SpeechResult) {
+      // Silence — gently prompt once then keep listening
       return res.type('text/xml').send(twiml(`
-        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
+        <Say voice="Polly.Amy-Neural" language="en-GB">Sorry, I didn't quite catch that — are you still there?</Say>
+        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
+        <Hangup/>
       `));
     }
 
@@ -314,8 +317,8 @@ router.post('/twilio/speech', async (req, res) => {
 
     res.type('text/xml').send(twiml(`
       <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
-      <Redirect method="POST">${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}</Redirect>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
+      <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
     logger.error('Twilio speech webhook error', { error: err.message });

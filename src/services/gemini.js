@@ -100,7 +100,8 @@ function startSession({ callId, agentConfig, leadData }) {
 
   // Map UI slider values (0–100) to Gemini generation config ranges
   const temperature     = parseFloat(((settings.creativity ?? 75) / 100).toFixed(2));
-  const maxOutputTokens = Math.round(100 + ((settings.patience ?? 70) / 100) * 400); // 100–500
+  // Cap at 200 — phone calls need short, snappy responses to avoid dead air
+  const maxOutputTokens = Math.round(80 + ((settings.patience ?? 70) / 100) * 120); // 80–200
 
   // Add conversation style modifier to system instruction
   const styleNote = (settings.conversationStyle === 'casual')

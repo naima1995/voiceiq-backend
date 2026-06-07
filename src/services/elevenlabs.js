@@ -132,13 +132,13 @@ function getVoiceMap() {
 }
 
 // ─── Add Natural Pauses via SSML-like markers ────────────────────────────
-// ElevenLabs respects <break> tags in turbo model
+// Keep pauses short — long breaks cause noticeable dead air on a phone call
 function addNaturalPauses(text) {
   return text
-    .replace(/\.\s+/g, '. <break time="400ms"/> ')
-    .replace(/\?\s+/g, '? <break time="300ms"/> ')
-    .replace(/,\s+/g, ', <break time="150ms"/> ')
-    .replace(/—/g, '<break time="250ms"/>');
+    .replace(/\.\s+/g, '. <break time="150ms"/> ')
+    .replace(/\?\s+/g, '? <break time="150ms"/> ')
+    .replace(/,\s+/g, ', <break time="75ms"/> ')
+    .replace(/—/g, '<break time="100ms"/>');
 }
 
 module.exports = {
