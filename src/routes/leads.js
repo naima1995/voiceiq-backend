@@ -98,6 +98,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
       }
 
       lead.phone = validation.number; // store normalised E.164
+      lead.campaignId = req.body.campaignId || req.query.campaignId || null;
+      lead.status = 'pending'; // pending | called | booked | no_answer | do_not_call
+      lead.id = require('crypto').randomUUID();
       validLeads.push(lead);
     });
 
@@ -141,3 +144,4 @@ router.delete('/', (req, res) => {
 });
 
 module.exports = router;
+module.exports.leadsStore = leadsStore;
