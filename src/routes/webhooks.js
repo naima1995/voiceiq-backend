@@ -18,7 +18,7 @@ function twiml(inner) {
 // ─── Twilio: call answered — generate greeting, start AI session ──────────
 router.post('/twilio/answer', async (req, res) => {
   const {
-    agentId = 'james', callId,
+    agentId = 'rachel', callId,
     leadName = '', leadCompany = '',
     leadFname = '', leadLname = '', leadDob = '', leadPhone = '',
     leadAddr1 = '', leadAddr2 = '', leadAddr3 = '',
