@@ -52,26 +52,31 @@ router.get('/active/all', (req, res) => {
 
 // ─── Get analytics summary ────────────────────────────────────────────────
 router.get('/analytics/summary', (req, res) => {
-  const today = new Date().toDateString();
-  const todayCalls = callLog.filter(c => new Date(c.loggedAt).toDateString() === today);
+  const todayStr     = new Date().toDateString();
+  const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
 
-  const booked   = todayCalls.filter(c => c.summary?.outcome === 'meeting_booked').length;
-  const answered = todayCalls.filter(c => c.summary?.outcome !== 'no_answer').length;
-  const scores   = todayCalls.filter(c => c.summary?.avgCallScore).map(c => c.summary.avgCallScore);
-  const avgScore = scores.length ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : 0;
+  const todayCalls     = callLog.filter(c => new Date(c.loggedAt).toDateString() === todayStr);
+  const yesterdayCalls = callLog.filter(c => new Date(c.loggedAt).toDateString() === yesterdayStr);
 
-  res.json({
-    today: {
-      total:       todayCalls.length,
+  function summarise(calls) {
+    const booked   = calls.filter(c => c.summary?.outcome === 'meeting_booked').length;
+    const answered = calls.filter(c => c.summary?.outcome !== 'no_answer').length;
+    const scores   = calls.filter(c => c.summary?.avgCallScore).map(c => c.summary.avgCallScore);
+    const avgScore = scores.length ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : 0;
+    return {
+      total:       calls.length,
       answered,
-      answerRate:  todayCalls.length ? Math.round((answered / todayCalls.length) * 100) : 0,
+      answerRate:  calls.length ? Math.round((answered / calls.length) * 100) : 0,
       booked,
       bookingRate: answered ? Math.round((booked / answered) * 100) : 0,
       avgScore:    parseFloat(avgScore),
-    },
-    allTime: {
-      total: callLog.length,
-    }
+    };
+  }
+
+  res.json({
+    today:     summarise(todayCalls),
+    yesterday: summarise(yesterdayCalls),
+    allTime:   { total: callLog.length },
   });
 });
 
