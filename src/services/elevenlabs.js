@@ -45,11 +45,22 @@ const VOICE_SETTINGS = {
 };
 
 // ─── Text to Speech — returns audio Buffer ────────────────────────────────
-async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_44100_128' }) {
+async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_44100_128', agentSettings = null }) {
   const voiceId = VOICE_IDS[agentName.toLowerCase()];
   if (!voiceId) throw new Error(`No voice ID configured for agent "${agentName}" — set ELEVENLABS_VOICE_${agentName.toUpperCase()} in Railway Variables`);
 
-  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
+  const base = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
+
+  // Override stability and style from agent settings sliders (0–100 → 0.0–1.0)
+  const settings = agentSettings
+    ? {
+        ...base,
+        stability:        parseFloat(((agentSettings.stability  ?? 60) / 100).toFixed(2)),
+        style:            parseFloat(((agentSettings.voiceSpeed ?? 80) / 100).toFixed(2)),
+        similarity_boost: base.similarity_boost,
+        use_speaker_boost: true,
+      }
+    : base;
 
   logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length });
 

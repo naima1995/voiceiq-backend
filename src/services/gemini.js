@@ -95,12 +95,23 @@ const sessions = new Map();
 
 // ─── Start a new call session ─────────────────────────────────────────────
 function startSession({ callId, agentConfig, leadData }) {
-  const rawName = agentConfig.name || 'James';
+  const rawName  = agentConfig.name || 'James';
+  const settings = agentConfig.settings || {};
+
+  // Map UI slider values (0–100) to Gemini generation config ranges
+  const temperature     = parseFloat(((settings.creativity ?? 75) / 100).toFixed(2));
+  const maxOutputTokens = Math.round(100 + ((settings.patience ?? 70) / 100) * 400); // 100–500
+
+  // Add conversation style modifier to system instruction
+  const styleNote = (settings.conversationStyle === 'casual')
+    ? '\n\nSTYLE OVERRIDE: Be more casual, relaxed, and conversational — like a friendly chat, not a formal call.'
+    : '\n\nSTYLE OVERRIDE: Maintain a professional, polished tone throughout — warm but businesslike.';
+
   const systemInstruction = buildSystemPrompt({
     agentName:      rawName.charAt(0).toUpperCase() + rawName.slice(1),
     agentAccent:    agentConfig.accent || 'Neutral UK Business',
     companyName:    agentConfig.companyName || 'VoiceIQ',
-    campaignScript: agentConfig.script,
+    campaignScript: (agentConfig.script || '') + styleNote,
     faqContext:     agentConfig.faqContext,
     taskContext:    agentConfig.taskContext,
   });
@@ -110,10 +121,10 @@ function startSession({ callId, agentConfig, leadData }) {
     systemInstruction,
     safetySettings: SAFETY_SETTINGS,
     generationConfig: {
-      temperature:     0.75,   // Natural but not unpredictable
+      temperature,
       topP:            0.92,
       topK:            40,
-      maxOutputTokens: 300,    // Keep responses short — it's a phone call
+      maxOutputTokens,
       responseMimeType: 'application/json',
     },
   });

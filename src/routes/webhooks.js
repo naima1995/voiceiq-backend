@@ -38,10 +38,11 @@ router.post('/twilio/answer', async (req, res) => {
     gemini.startSession({
       callId: voiceiqCallId,
       agentConfig: {
-        name:        agentConfig.name  || agentId,
-        accent:      agentConfig.accent || 'Southern British',
+        name:        agentConfig.name       || agentId,
+        accent:      agentConfig.accent     || 'Southern British',
         companyName: agentConfig.companyName || process.env.COMPANY_NAME || 'VoiceIQ',
-        script:      agentConfig.script || '',
+        script:      agentConfig.script     || '',
+        settings:    agentConfig.settings   || null,
         faqContext,
         taskContext,
       },
@@ -80,6 +81,7 @@ router.post('/twilio/answer', async (req, res) => {
     const audioBuffer = await elevenlabs.textToSpeech({
       text: elevenlabs.addNaturalPauses(aiResponse.speech),
       agentName: agentId,
+      agentSettings: agentConfig.settings || null,
     });
     const audioUrl  = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
     const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
@@ -185,6 +187,7 @@ router.post('/twilio/speech', async (req, res) => {
     const audioBuffer = await elevenlabs.textToSpeech({
       text: elevenlabs.addNaturalPauses(aiResponse.speech),
       agentName: agentId,
+      agentSettings: agentConfig.settings || null,
     });
     const audioUrl = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
 

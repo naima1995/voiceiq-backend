@@ -123,6 +123,7 @@ const agents = new Map([
     id: 'james', name: 'James', accent: 'Neutral UK Business', gender: 'Male',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_JAMES,
     companyName: 'VoiceIQ', script: DEFAULT_PROTECTION_SCRIPT, faqContext: null,
+    settings: { creativity: 75, patience: 70, stability: 65, voiceSpeed: 80, conversationStyle: 'formal' },
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
@@ -130,6 +131,7 @@ const agents = new Map([
     id: 'rachel', name: 'Rachel', accent: 'Southern British', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_RACHEL,
     companyName: 'VoiceIQ', script: DEFAULT_PROTECTION_SCRIPT, faqContext: null,
+    settings: { creativity: 75, patience: 70, stability: 55, voiceSpeed: 80, conversationStyle: 'formal' },
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
@@ -137,6 +139,7 @@ const agents = new Map([
     id: 'shelley', name: 'Shelley', accent: 'Warm British Professional', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_SHELLEY,
     companyName: 'VoiceIQ', script: DEFAULT_PROTECTION_SCRIPT, faqContext: null,
+    settings: { creativity: 70, patience: 75, stability: 58, voiceSpeed: 80, conversationStyle: 'formal' },
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
@@ -144,6 +147,7 @@ const agents = new Map([
     id: 'alexis', name: 'Alexis', accent: 'Clear Confident British', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_ALEXIS,
     companyName: 'VoiceIQ', script: DEFAULT_PROTECTION_SCRIPT, faqContext: null,
+    settings: { creativity: 70, patience: 65, stability: 62, voiceSpeed: 85, conversationStyle: 'formal' },
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
@@ -188,7 +192,7 @@ router.get('/:id', (req, res) => {
 
 // ─── Create agent ─────────────────────────────────────────────────────────
 router.post('/', (req, res) => {
-  const { name, accent, gender, companyName, script, faqContext, voiceId } = req.body;
+  const { name, accent, gender, companyName, script, faqContext, voiceId, settings } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const id = name.toLowerCase().replace(/\s+/g, '_');
@@ -200,6 +204,7 @@ router.post('/', (req, res) => {
     companyName: companyName || 'VoiceIQ',
     script: script || DEFAULT_PROTECTION_SCRIPT,
     faqContext: faqContext || null,
+    settings: settings || { creativity: 75, patience: 70, stability: 60, voiceSpeed: 80, conversationStyle: 'formal' },
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0 },
     createdAt: new Date().toISOString(),
   };
@@ -213,7 +218,7 @@ router.patch('/:id', (req, res) => {
   const agent = agents.get(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-  const allowed = ['name', 'accent', 'gender', 'status', 'companyName', 'script', 'faqContext', 'voiceId'];
+  const allowed = ['name', 'accent', 'gender', 'status', 'companyName', 'script', 'faqContext', 'voiceId', 'settings'];
   allowed.forEach(field => {
     if (req.body[field] !== undefined) agent[field] = req.body[field];
   });
