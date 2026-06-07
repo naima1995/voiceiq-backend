@@ -114,5 +114,34 @@ router.delete('/:id', (req, res) => {
   res.json({ deleted: true, id: req.params.id });
 });
 
+// ─── Agent Tasks store (synced from frontend via POST) ────────────────────
+let agentTasksStore = [];
+
+router.post('/tasks/sync', (req, res) => {
+  const { tasks } = req.body;
+  if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks must be an array' });
+  agentTasksStore = tasks;
+  res.json({ synced: true, count: tasks.length });
+});
+
+router.get('/tasks', (req, res) => {
+  res.json({ tasks: agentTasksStore });
+});
+
+// Build task context string for Gemini prompt
+function buildTaskContext(agentId) {
+  const relevant = agentTasksStore.filter(t => !t.agentId || t.agentId === agentId);
+  if (!relevant.length) return null;
+
+  return `AGENT TASKS — follow these during the call:\n\n` + relevant.map(t => {
+    let block = `TASK: ${t.name}\nType: ${t.type}\nInstructions: ${t.instructions}`;
+    if (t.attributes?.length) {
+      block += `\nCapture these attributes: ${t.attributes.join(', ')}`;
+    }
+    return block;
+  }).join('\n\n');
+}
+
 module.exports = router;
 module.exports.updateAgentStats = updateAgentStats;
+module.exports.buildTaskContext  = buildTaskContext;

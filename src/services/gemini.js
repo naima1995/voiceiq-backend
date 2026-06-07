@@ -62,7 +62,7 @@ callScore: integer 1-10. Rate this specific turn's quality — how well the conv
 `;
 
 // ─── Build agent-specific system prompt ───────────────────────────────────
-function buildSystemPrompt({ agentName, agentAccent, companyName, campaignScript, faqContext }) {
+function buildSystemPrompt({ agentName, agentAccent, companyName, campaignScript, faqContext, taskContext }) {
   return `${BASE_SYSTEM_INSTRUCTION}
 
 YOUR IDENTITY:
@@ -73,7 +73,8 @@ YOUR IDENTITY:
 CAMPAIGN SCRIPT & GOALS:
 ${campaignScript || 'Introduce the company, qualify the prospect, and book a discovery call.'}
 
-${faqContext ? `COMPANY KNOWLEDGE BASE:\n${faqContext}` : ''}
+${faqContext   ? `COMPANY KNOWLEDGE BASE:\n${faqContext}\n`   : ''}
+${taskContext  ? `${taskContext}\n`                           : ''}
 `.trim();
 }
 
@@ -90,6 +91,7 @@ function startSession({ callId, agentConfig, leadData }) {
     companyName:    agentConfig.companyName || 'VoiceIQ',
     campaignScript: agentConfig.script,
     faqContext:     agentConfig.faqContext,
+    taskContext:    agentConfig.taskContext,
   });
 
   const model = genAI.getGenerativeModel({
