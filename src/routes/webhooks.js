@@ -23,6 +23,7 @@ router.post('/twilio/answer', async (req, res) => {
     leadFname = '', leadLname = '', leadDob = '', leadPhone = '',
     leadAddr1 = '', leadAddr2 = '', leadAddr3 = '',
     leadTown = '', leadCountry = '', leadPost = '',
+    leadProvider = '',
   } = req.query;
   const { CallSid, From, To } = req.body;
   const voiceiqCallId = callId || CallSid;
@@ -54,11 +55,25 @@ router.post('/twilio/answer', async (req, res) => {
         town:        leadTown,
         country:     leadCountry,
         postcode:    leadPost,
-        callStarted: new Date().toISOString(), // record exact call time
+        provider:    leadProvider,
+        callStarted: new Date().toISOString(),
       },
     });
 
-    const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: null });
+    // Build a context-rich first-turn trigger so Gemini knows who it's calling
+    const greeting = leadFname || leadLname || leadName || null;
+    const contextLines = [
+      greeting   ? `Client name: ${[leadFname, leadLname].filter(Boolean).join(' ') || leadName}` : null,
+      leadDob    ? `Client age/DOB: ${leadDob}` : null,
+      leadProvider ? `Client's current insurance provider: ${leadProvider}` : null,
+      leadPost   ? `Client postcode: ${leadPost}` : null,
+    ].filter(Boolean);
+
+    const firstTurnMessage = contextLines.length
+      ? `[CALL_CONNECTED]\nLead context:\n${contextLines.join('\n')}\n\nStart with your greeting now.`
+      : `[CALL_CONNECTED — start with your greeting now]`;
+
+    const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: firstTurnMessage });
     const audioBuffer = await elevenlabs.textToSpeech({
       text: elevenlabs.addNaturalPauses(aiResponse.speech),
       agentName: agentId,
@@ -169,9 +184,10 @@ router.post('/twilio/speech', async (req, res) => {
           notes: [
             `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back on ${callbackDateStr} at ${callbackTimeStr}.`,
             ``,
-            `First Name:          ${lead.fname   || md.name?.split(' ')[0] || 'N/A'}`,
-            `Last Name:           ${lead.lname   || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
-            `DOB:                 ${lead.dob     || 'N/A'}`,
+            `First Name:          ${lead.fname    || md.name?.split(' ')[0] || 'N/A'}`,
+            `Last Name:           ${lead.lname    || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
+            `DOB:                 ${lead.dob      || 'N/A'}`,
+            `Current Provider:    ${lead.provider || 'N/A'}`,
             `Address:             ${fullAddress}`,
             ``,
             `Meeting/Call Date:   ${callbackDateStr}`,
