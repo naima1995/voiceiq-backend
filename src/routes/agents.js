@@ -258,6 +258,11 @@ function buildTaskContext(agentId) {
   }).join('\n\n');
 }
 
+function getAgent(id) {
+  return agents.get(id) || null;
+}
+
 module.exports = router;
 module.exports.updateAgentStats = updateAgentStats;
 module.exports.buildTaskContext  = buildTaskContext;
+module.exports.getAgent          = getAgent;

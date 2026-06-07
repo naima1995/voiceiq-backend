@@ -6,7 +6,7 @@ const calendar = require('../services/calendar');
 const { emit } = require('../services/websocket');
 const { logCall } = require('./calls');
 const { getKnowledgeForAgent } = require('./knowledge');
-const { buildTaskContext } = require('./agents');
+const { buildTaskContext, getAgent } = require('./agents');
 const logger = require('../utils/logger');
 const audioCache = require('../utils/audioCache');
 
@@ -30,15 +30,18 @@ router.post('/twilio/answer', async (req, res) => {
   const base = process.env.CALLBACK_BASE_URL;
 
   try {
-    // Load knowledge base content and task instructions for this agent
+    // Load agent config, knowledge base, and task instructions
+    const agentConfig = getAgent(agentId) || {};
     const faqContext  = getKnowledgeForAgent(agentId);
     const taskContext = buildTaskContext(agentId);
 
     gemini.startSession({
       callId: voiceiqCallId,
       agentConfig: {
-        name:        agentId,
-        companyName: process.env.COMPANY_NAME || 'VoiceIQ',
+        name:        agentConfig.name  || agentId,
+        accent:      agentConfig.accent || 'Southern British',
+        companyName: agentConfig.companyName || process.env.COMPANY_NAME || 'VoiceIQ',
+        script:      agentConfig.script || '',
         faqContext,
         taskContext,
       },
