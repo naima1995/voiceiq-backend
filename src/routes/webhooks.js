@@ -91,8 +91,9 @@ router.post('/twilio/answer', async (req, res) => {
     logger.info('Twilio call answered', { voiceiqCallId, speech: aiResponse.speech });
 
     res.type('text/xml').send(twiml(`
-      <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Play>${audioUrl}</Play>
+      </Gather>
       <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
@@ -168,11 +169,11 @@ router.post('/twilio/speech', async (req, res) => {
 
   try {
     if (!SpeechResult) {
-      // Silence — gently prompt once then keep listening
+      // No speech detected — keep the call alive and listen again
       return res.type('text/xml').send(twiml(`
-        <Say voice="Polly.Amy-Neural" language="en-GB">Sorry, I didn't quite catch that — are you still there?</Say>
-        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
-        <Hangup/>
+        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        </Gather>
+        <Redirect method="POST">${speechUrl}</Redirect>
       `));
     }
 
@@ -317,8 +318,9 @@ router.post('/twilio/speech', async (req, res) => {
     }
 
     res.type('text/xml').send(twiml(`
-      <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB" timeout="10"></Gather>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Play>${audioUrl}</Play>
+      </Gather>
       <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
