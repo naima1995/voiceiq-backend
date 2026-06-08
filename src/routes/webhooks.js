@@ -164,6 +164,7 @@ router.post('/twilio/speech', async (req, res) => {
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
   const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+  const agentConfig = getAgent(agentId) || {};
 
   try {
     if (!SpeechResult) {
