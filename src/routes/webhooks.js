@@ -160,7 +160,7 @@ function isAIScreenerOrVoicemail(speech) {
 
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
-  const { agentId = 'rachel', callId } = req.query;
+  const { agentId = 'rachel', callId, silence = '0' } = req.query;
   const { SpeechResult, CallSid } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
@@ -169,11 +169,19 @@ router.post('/twilio/speech', async (req, res) => {
 
   try {
     if (!SpeechResult) {
-      // No speech detected — keep the call alive and listen again
+      const silenceCount = parseInt(silence, 10) || 0;
+      if (silenceCount >= 1) {
+        // Second consecutive silence — no one home, end the call cleanly
+        logger.info('No speech after 2 attempts — ending call', { voiceiqCallId });
+        gemini.endSession(voiceiqCallId);
+        return res.type('text/xml').send(twiml(`<Hangup/>`));
+      }
+      // First silence — give one more chance
+      const retryUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}&amp;silence=1`;
       return res.type('text/xml').send(twiml(`
-        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Gather input="speech" action="${retryUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         </Gather>
-        <Redirect method="POST">${speechUrl}</Redirect>
+        <Redirect method="POST">${retryUrl}</Redirect>
       `));
     }
 
