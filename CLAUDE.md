@@ -75,7 +75,8 @@ Catch blocks must re-gather to keep the call alive. A `<Hangup/>` in a catch blo
 ## Gemini Configuration
 
 - **Model:** `process.env.GEMINI_MODEL || 'gemini-2.5-flash'`
-- **`maxOutputTokens`:** minimum **300**, range 300–600. Do NOT go below 300 — Gemini 2.5 Flash uses internal reasoning tokens and the JSON wrapper needs ~50 tokens alone. Low values cause truncated JSON → parse failure → fallback on every turn.
+- **`maxOutputTokens`:** fixed at **1024**. Do NOT reduce — Gemini 2.5 Flash uses internal reasoning tokens on top of output tokens. Low values cause truncated JSON → parse failure → fallback speech on every turn.
+- **`thinkingConfig: { thinkingBudget: 0 }`:** REQUIRED for real-time phone calls. Without it, Gemini 2.5 Flash's thinking mode adds 1–5 seconds of latency per turn AND consumes tokens from the output budget. Disabling thinking is safe — the system prompt provides all necessary context.
 - **`temperature`:** mapped from agent `creativity` setting (0–1.0)
 - **`responseMimeType`:** always `'application/json'` — responses must be valid JSON
 - **Fallback response:** parse errors return a graceful fallback (not `hangUpNow`) to keep the call alive

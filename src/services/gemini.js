@@ -125,8 +125,11 @@ function startSession({ callId, agentConfig, leadData }) {
       temperature,
       topP:            0.92,
       topK:            40,
-      maxOutputTokens,
+      maxOutputTokens: 1024,   // Fixed ceiling — thinking mode was consuming the budget leaving nothing for the response
       responseMimeType: 'application/json',
+      thinkingConfig: {
+        thinkingBudget: 0,     // Disable thinking for real-time phone calls — reduces latency by 1-5s per turn
+      },
     },
   });
 
@@ -216,8 +219,9 @@ async function generateCallSummary({ callId, duration }) {
     model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 500,
+      maxOutputTokens: 1024,
       responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
 
