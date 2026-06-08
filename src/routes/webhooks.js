@@ -91,7 +91,7 @@ router.post('/twilio/answer', async (req, res) => {
     logger.info('Twilio call answered', { voiceiqCallId, speech: aiResponse.speech });
 
     res.type('text/xml').send(twiml(`
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="1" language="en-GB" timeout="15">
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         <Play>${audioUrl}</Play>
       </Gather>
       <Redirect method="POST">${speechUrl}</Redirect>
@@ -100,7 +100,7 @@ router.post('/twilio/answer', async (req, res) => {
     logger.error('Twilio answer webhook error', { error: err.message });
     const fallbackSpeechUrl = `${process.env.CALLBACK_BASE_URL}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(callId || '')}`;
     res.type('text/xml').send(twiml(`
-      <Gather input="speech" action="${fallbackSpeechUrl}" method="POST" speechTimeout="1" language="en-GB" timeout="15">
+      <Gather input="speech" action="${fallbackSpeechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         <Say language="en-GB">One moment please.</Say>
       </Gather>
       <Redirect method="POST">${fallbackSpeechUrl}</Redirect>
@@ -185,7 +185,7 @@ router.post('/twilio/speech', async (req, res) => {
       // First silence — give one more chance
       const retryUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}&amp;silence=1`;
       return res.type('text/xml').send(twiml(`
-        <Gather input="speech" action="${retryUrl}" method="POST" speechTimeout="1" language="en-GB" timeout="15">
+        <Gather input="speech" action="${retryUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         </Gather>
         <Redirect method="POST">${retryUrl}</Redirect>
       `));
@@ -332,7 +332,7 @@ router.post('/twilio/speech', async (req, res) => {
     }
 
     res.type('text/xml').send(twiml(`
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="1" language="en-GB" timeout="15">
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         <Play>${audioUrl}</Play>
       </Gather>
       <Redirect method="POST">${speechUrl}</Redirect>
@@ -341,7 +341,7 @@ router.post('/twilio/speech', async (req, res) => {
     logger.error('Twilio speech webhook error', { error: err.message });
     // On any error keep the call alive — re-gather rather than hang up
     res.type('text/xml').send(twiml(`
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="1" language="en-GB" timeout="15">
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         <Say language="en-GB">Sorry, one moment.</Say>
       </Gather>
       <Redirect method="POST">${speechUrl}</Redirect>
