@@ -1,5 +1,11 @@
 # VoiceIQ Backend — Claude Guidelines
 
+## ⚠️ Git Rules — ALWAYS FOLLOW
+- **NEVER `git push` without asking the user first.** Make the commit, then ask "Ready to push?" before running `git push`.
+- **NEVER modify `DEFAULT_PROTECTION_SCRIPT` contents** without explicit user instruction. Structural additions (phase labels, step markers) must also be approved first.
+
+---
+
 ## Project Overview
 VoiceIQ is a UK-based AI outbound calling platform for a **protection advisory service**. The backend handles Twilio telephony, Gemini AI conversations, ElevenLabs TTS, Google Calendar bookings, and lead management.
 
