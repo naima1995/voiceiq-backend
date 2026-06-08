@@ -100,8 +100,8 @@ function startSession({ callId, agentConfig, leadData }) {
 
   // Map UI slider values (0–100) to Gemini generation config ranges
   const temperature     = parseFloat(((settings.creativity ?? 75) / 100).toFixed(2));
-  // Cap at 200 — phone calls need short, snappy responses to avoid dead air
-  const maxOutputTokens = Math.round(80 + ((settings.patience ?? 70) / 100) * 120); // 80–200
+  // 300–600 tokens: enough for JSON wrapper + speech + notes; Gemini 2.5 Flash uses extra tokens for reasoning
+  const maxOutputTokens = Math.round(300 + ((settings.patience ?? 70) / 100) * 300); // 300–600
 
   // Add conversation style modifier to system instruction
   const styleNote = (settings.conversationStyle === 'casual')
