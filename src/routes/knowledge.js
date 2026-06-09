@@ -94,7 +94,8 @@ async function parseFile(buffer, originalname) {
 
   if (ext === '.pdf') {
     const pdfParse = require('pdf-parse');
-    const data = await pdfParse(buffer);
+    const parse = pdfParse.default || pdfParse;
+    const data = await parse(buffer);
     return data.text;
   }
 
