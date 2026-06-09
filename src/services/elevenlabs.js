@@ -51,18 +51,24 @@ async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_441
 
   const base = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
 
-  // Override stability and style from agent settings sliders (0–100 → 0.0–1.0)
+  // Override stability from slider; map voiceSpeed (0–100) → speed (0.7–1.2)
+  // speed controls actual speaking rate — higher = faster audio = shorter turn gap
   const settings = agentSettings
     ? {
         ...base,
         stability:        parseFloat(((agentSettings.stability  ?? 60) / 100).toFixed(2)),
-        style:            parseFloat(((agentSettings.voiceSpeed ?? 80) / 100).toFixed(2)),
         similarity_boost: base.similarity_boost,
+        style:            base.style,
         use_speaker_boost: true,
       }
     : base;
 
-  logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length });
+  // speaking speed: slider 0–100 maps to 0.7–1.2 (1.0 = normal, 1.2 = ~20% faster)
+  const speed = agentSettings
+    ? parseFloat((0.7 + ((agentSettings.voiceSpeed ?? 80) / 100) * 0.5).toFixed(2))
+    : 1.0;
+
+  logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length, speed });
 
   const response = await axios.post(
     `${BASE_URL}/text-to-speech/${voiceId}?output_format=${outputFormat}`,
@@ -70,6 +76,7 @@ async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_441
       text,
       model_id: 'eleven_flash_v2_5',   // Lowest latency — ideal for live calls
       voice_settings: settings,
+      speed,
     },
     {
       headers: headers(),
