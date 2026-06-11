@@ -61,11 +61,13 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'rachel', lead
     statusCallbackMethod: 'POST',
     statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed'],
     // ── Answering Machine Detection ───────────────────────────────────────
-    // Detects voicemail / answering machines before the agent speaks.
-    // 'Enable' = synchronous — Twilio waits up to 5s before connecting.
-    machineDetection:           'Enable',
-    machineDetectionTimeout:    5,       // seconds to wait for AMD result
-    asyncAmdStatusCallback:     `${base}/api/webhooks/twilio/amd`,
+    // asyncAmd: 'true' fires /answer immediately on connect so the agent
+    // speaks first without delay. AMD result arrives separately via
+    // asyncAmdStatusCallback — if machine, the /amd route ends the call.
+    machineDetection:             'Enable',
+    machineDetectionTimeout:      5,
+    asyncAmd:                     'true',
+    asyncAmdStatusCallback:       `${base}/api/webhooks/twilio/amd`,
     asyncAmdStatusCallbackMethod: 'POST',
   });
 
