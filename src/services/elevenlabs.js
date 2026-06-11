@@ -19,28 +19,32 @@ const headers = () => ({
 // ─── Voice Settings per agent personality ────────────────────────────────
 const VOICE_SETTINGS = {
   james: {
-    stability: 0.65,         // Measured, professional
+    stability: 0.55,         // Measured, professional
     similarity_boost: 0.80,
-    style: 0.1,
-    use_speaker_boost: true,
-  },
-  rachel: {
-    stability: 0.55,         // Warm, natural British
-    similarity_boost: 0.85,
     style: 0.2,
     use_speaker_boost: true,
+    speed: 1.05,
+  },
+  rachel: {
+    stability: 0.30,         // Energetic, dynamic — low stability = more lively
+    similarity_boost: 0.85,
+    style: 0.60,             // High style = expressive, young, upbeat feel
+    use_speaker_boost: true,
+    speed: 1.10,             // Slightly faster — natural, upbeat pace
   },
   shelley: {
-    stability: 0.58,         // Warm, approachable professional
+    stability: 0.35,         // Warm, lively
     similarity_boost: 0.83,
-    style: 0.25,
+    style: 0.55,
     use_speaker_boost: true,
+    speed: 1.08,
   },
   alexis: {
-    stability: 0.62,         // Confident, clear
+    stability: 0.38,         // Confident, energetic
     similarity_boost: 0.82,
-    style: 0.15,
+    style: 0.50,
     use_speaker_boost: true,
+    speed: 1.08,
   },
 };
 
@@ -62,6 +66,9 @@ async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_441
       }
     : base;
 
+  // Extract speed separately — it's a top-level param in the ElevenLabs API, not inside voice_settings
+  const { speed, ...voiceSettings } = settings;
+
   logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length });
 
   const response = await axios.post(
@@ -69,7 +76,8 @@ async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_441
     {
       text,
       model_id: 'eleven_flash_v2_5',   // Lowest latency — ideal for live calls
-      voice_settings: settings,
+      voice_settings: voiceSettings,
+      ...(speed ? { speed } : {}),
     },
     {
       headers: headers(),
@@ -132,13 +140,13 @@ function getVoiceMap() {
 }
 
 // ─── Add Natural Pauses via SSML-like markers ────────────────────────────
-// Keep pauses short — long breaks cause noticeable dead air on a phone call
+// Short, energetic pauses — sounds like a quick, upbeat human speaker
 function addNaturalPauses(text) {
   return text
-    .replace(/\.\s+/g, '. <break time="150ms"/> ')
-    .replace(/\?\s+/g, '? <break time="150ms"/> ')
-    .replace(/,\s+/g, ', <break time="75ms"/> ')
-    .replace(/—/g, '<break time="100ms"/>');
+    .replace(/\.\s+/g, '. <break time="300ms"/> ')
+    .replace(/\?\s+/g, '? <break time="250ms"/> ')
+    .replace(/,\s+/g, ', <break time="80ms"/> ')
+    .replace(/—/g, '<break time="150ms"/>');
 }
 
 module.exports = {
