@@ -9,6 +9,7 @@ const VOICE_IDS = {
   rachel:  process.env.ELEVENLABS_VOICE_RACHEL  || '21m00Tcm4TlvDq8ikWAM',
   shelley: process.env.ELEVENLABS_VOICE_SHELLEY || '',
   alexis:  process.env.ELEVENLABS_VOICE_ALEXIS  || '',
+  alice:   process.env.ELEVENLABS_VOICE_ALICE   || 'ZEt85AU1ui8Rr8FxNslW',
 };
 
 const headers = () => ({
@@ -40,6 +41,12 @@ const VOICE_SETTINGS = {
     stability: 0.62,         // Confident, clear
     similarity_boost: 0.82,
     style: 0.15,
+    use_speaker_boost: true,
+  },
+  alice: {
+    stability: 0.58,         // Natural British female
+    similarity_boost: 0.83,
+    style: 0.2,
     use_speaker_boost: true,
   },
 };
@@ -128,6 +135,7 @@ function getVoiceMap() {
     rachel:  { id: VOICE_IDS.rachel,  name: 'Rachel',  accent: 'Southern British',          gender: 'Female' },
     shelley: { id: VOICE_IDS.shelley, name: 'Shelley', accent: 'Warm British Professional', gender: 'Female' },
     alexis:  { id: VOICE_IDS.alexis,  name: 'Alexis',  accent: 'Clear Confident British',   gender: 'Female' },
+    alice:   { id: VOICE_IDS.alice,   name: 'Alice',   accent: 'British Female',             gender: 'Female' },
   };
 }
 

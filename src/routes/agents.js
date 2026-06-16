@@ -142,6 +142,14 @@ const agents = new Map([
     stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
     createdAt: new Date().toISOString(),
   }],
+  ['alice', {
+    id: 'alice', name: 'Alice', accent: 'British Female', gender: 'Female',
+    status: 'active', voiceId: process.env.ELEVENLABS_VOICE_ALICE || 'ZEt85AU1ui8Rr8FxNslW',
+    companyName: 'VoiceIQ', script: DEFAULT_PROTECTION_SCRIPT, faqContext: null,
+    settings: { creativity: 75, patience: 70, stability: 60, voiceSpeed: 80, conversationStyle: 'formal' },
+    stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
+    createdAt: new Date().toISOString(),
+  }],
   ['alexis', {
     id: 'alexis', name: 'Alexis', accent: 'Clear Confident British', gender: 'Female',
     status: 'active', voiceId: process.env.ELEVENLABS_VOICE_ALEXIS,
