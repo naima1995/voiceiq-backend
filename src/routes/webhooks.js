@@ -213,8 +213,8 @@ router.post('/twilio/speech', async (req, res) => {
     emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
 
     // ── Create calendar task when AI confirms booking ─────────────────────
-    if (aiResponse.bookMeeting && aiResponse.meetingDetails) {
-      const md      = aiResponse.meetingDetails;
+    if (aiResponse.bookMeeting) {
+      const md      = aiResponse.meetingDetails || {};
       const session = gemini.getSession(voiceiqCallId);
       const lead    = session?.leadData || {};
 
@@ -296,8 +296,8 @@ router.post('/twilio/speech', async (req, res) => {
           callId:    voiceiqCallId,
           taskId:    task.taskId,
           name:      `${lead.fname || ''} ${lead.lname || ''}`.trim() || md.name,
-          date:      ukDate,
-          time:      ukTime,
+          date:      callbackDateStr,
+          time:      callbackTimeStr,
           phone:     lead.phoneNumber,
           agentName,
         });
