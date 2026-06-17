@@ -231,26 +231,38 @@ router.post('/twilio/speech', async (req, res) => {
           hour12: true,
         }).toUpperCase();
 
-        // Resolve callback/meeting time — prefer AI-extracted time, fall back to next day 14:00
+        // Resolve callback/meeting time from AI-extracted fields
         let callbackTime = null;
-        const rawPreferred = md.startTime || md.preferredTime;
-        if (rawPreferred && !isNaN(Date.parse(rawPreferred))) {
-          callbackTime = new Date(rawPreferred);
+
+        // 1. Best case: Gemini resolved a full ISO 8601 datetime
+        if (md.startTime && !isNaN(Date.parse(md.startTime))) {
+          callbackTime = new Date(md.startTime);
         }
 
-        // Safety net — never book same-day; push to next working day at 14:00 if needed
+        // 2. Fallback: combine preferredDate + preferredTime text
+        if (!callbackTime && md.preferredDate) {
+          const timePart  = md.preferredTime || '14:00';
+          const combined  = `${md.preferredDate} ${timePart}`;
+          const parsed    = Date.parse(combined);
+          if (!isNaN(parsed)) callbackTime = new Date(parsed);
+        }
+
+        // 3. Last resort: next working day at 14:00
         const today = new Date(callTime);
         today.setHours(0, 0, 0, 0);
         if (!callbackTime || callbackTime <= today) {
-          // Find next working day (skip Saturday/Sunday)
           const nextDay = new Date(callTime);
           nextDay.setDate(nextDay.getDate() + 1);
           nextDay.setHours(14, 0, 0, 0);
           if (nextDay.getDay() === 6) nextDay.setDate(nextDay.getDate() + 2); // skip Saturday
           if (nextDay.getDay() === 0) nextDay.setDate(nextDay.getDate() + 1); // skip Sunday
           callbackTime = nextDay;
-          logger.warn('Same-day booking blocked — pushed to next working day', {
-            voiceiqCallId, original: rawPreferred, rescheduled: callbackTime,
+          logger.warn('Could not resolve booking time from AI — pushed to next working day', {
+            voiceiqCallId,
+            startTime:     md.startTime,
+            preferredDate: md.preferredDate,
+            preferredTime: md.preferredTime,
+            rescheduled:   callbackTime,
           });
         }
 

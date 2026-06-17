@@ -74,7 +74,16 @@ callScore: integer 1-10. Rate this specific turn's quality — how well the conv
 
 // ─── Build agent-specific system prompt ───────────────────────────────────
 function buildSystemPrompt({ agentName, agentAccent, companyName, campaignScript, faqContext, taskContext }) {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/London' });
+  const todayISO = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); // YYYY-MM-DD
+
   return `${BASE_SYSTEM_INSTRUCTION}
+
+CURRENT DATE & TIME (Europe/London):
+- Today is ${todayStr} (${todayISO})
+- Use this to resolve relative dates like "next Tuesday", "this Friday", "tomorrow" into exact ISO 8601 datetimes for startTime in meetingDetails
+- NEVER book for today (${todayISO}) — if they say today, politely redirect to a future date
 
 YOUR IDENTITY:
 - Your name is ${agentName}
