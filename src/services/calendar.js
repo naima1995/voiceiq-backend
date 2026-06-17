@@ -253,6 +253,26 @@ async function createTask({ title, dueTime, notes, durationMins = 60 }) {
   };
 }
 
+// ─── Append call summary to an existing calendar event's description ──────
+async function updateTaskNotes(eventId, summaryText) {
+  const cal        = getCalendarClient();
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+  const existing = await cal.events.get({ calendarId, eventId });
+  const current  = existing.data.description || '';
+
+  const updated = current + '\n\n--- AI Call Summary ---\n' + summaryText;
+
+  await cal.events.patch({
+    calendarId,
+    eventId,
+    requestBody: { description: updated },
+    sendUpdates: 'none',
+  });
+
+  logger.info('Calendar event updated with call summary', { eventId });
+}
+
 // ─── Reschedule a Meeting ─────────────────────────────────────────────────
 async function rescheduleMeeting({ eventId, newStartTime, newEndTime, reason }) {
   const calendar = getCalendarClient();
@@ -371,6 +391,7 @@ module.exports = {
   getAvailableSlots,
   bookMeeting,
   createTask,
+  updateTaskNotes,
   rescheduleMeeting,
   cancelMeeting,
   listUpcomingEvents,

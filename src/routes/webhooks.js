@@ -365,6 +365,22 @@ router.post('/twilio/status', async (req, res) => {
       bookingResult = session?.bookingResult || null;
 
       summary = await gemini.generateCallSummary({ callId: CallSid, duration });
+
+      // Append AI summary to the calendar event created during the call
+      if (summary && bookingResult?.taskId) {
+        const summaryLines = [
+          summary.summary     ? summary.summary                        : null,
+          summary.outcome     ? `\nOutcome:     ${summary.outcome}`    : null,
+          summary.keyPoints?.length ? `\nKey Points:\n${summary.keyPoints.map(p => `  • ${p}`).join('\n')}` : null,
+          summary.objections?.length ? `\nObjections:\n${summary.objections.map(o => `  • ${o}`).join('\n')}` : null,
+          summary.nextAction  ? `\nNext Action: ${summary.nextAction}` : null,
+        ].filter(Boolean).join('\n');
+
+        calendar.updateTaskNotes(bookingResult.taskId, summaryLines).catch(err =>
+          logger.warn('Failed to update calendar task with summary', { error: err.message })
+        );
+      }
+
       gemini.endSession(CallSid);
     } catch (err) {
       logger.warn('Call summary failed', { error: err.message });
