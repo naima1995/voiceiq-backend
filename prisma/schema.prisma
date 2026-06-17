@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Agent {
+  id                String    @id
+  name              String
+  accent            String?
+  gender            String?
+  status            String    @default("active")
+  voiceId           String?
+  companyName       String?
+  script            String?   @db.Text
+  faqContext        String?   @db.Text
+  creativity        Int       @default(75)
+  patience          Int       @default(70)
+  stability         Int       @default(60)
+  voiceSpeed        Int       @default(80)
+  conversationStyle String    @default("formal")
+  callsToday        Int       @default(0)
+  bookings          Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  campaigns Campaign[]
+  calls     Call[]
+}
+
+model Campaign {
+  id          String    @id @default(uuid())
+  name        String
+  status      String    @default("draft")
+  agentId     String?
+  dailyLimit  Int?
+  startDate   String?
+  timezone    String    @default("Europe/London")
+  scheduledAt DateTime?
+  leadCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  agent Agent?  @relation(fields: [agentId], references: [id])
+  leads Lead[]
+  calls Call[]
+}
+
+model Lead {
+  id          String   @id @default(uuid())
+  campaignId  String?
+  name        String?
+  firstName   String?
+  lastName    String?
+  title       String?
+  phone       String
+  email       String?
+  address     String?
+  town        String?
+  country     String?
+  postcode    String?
+  age         String?
+  life        String?
+  provider    String?
+  status      String   @default("pending")
+  importedAt  DateTime @default(now())
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id])
+  calls    Call[]
+}
+
+model Call {
+  id          String    @id @default(uuid())
+  callId      String?   @unique
+  direction   String    @default("outbound")
+  channel     String    @default("twilio")
+  agentId     String?
+  campaignId  String?
+  leadId      String?
+  toNumber    String?
+  fromNumber  String?
+  duration    Int?
+  status      String?
+  outcome     String?
+  summary     String?   @db.Text
+  notes       String?   @db.Text
+  bookingId   String?
+  bookingLink String?
+  bookingDue  DateTime?
+  loggedAt    DateTime  @default(now())
+
+  agent    Agent?    @relation(fields: [agentId], references: [id])
+  campaign Campaign? @relation(fields: [campaignId], references: [id])
+  lead     Lead?     @relation(fields: [leadId], references: [id])
+}
+
+model KnowledgeBase {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  agentId     String?
+  type        String   @default("file")
+  fileName    String?
+  fileType    String?
+  fileSize    Int?
+  charCount   Int?
+  content     String   @db.Text
+  builtin     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
