@@ -13,7 +13,7 @@
     "@azure/msal-node": "^2.6.0",
     "@google/generative-ai": "^0.24.1",
     "@microsoft/microsoft-graph-client": "^3.0.7",
-    "@prisma/client": "^7.8.0",
+    "@prisma/client": "^5.22.0",
     "axios": "^1.6.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
@@ -30,11 +30,11 @@
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
     "pdf-parse": "^1.1.1",
+    "prisma": "^5.22.0",
     "twilio": "^5.13.1",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
     "ws": "^8.14.2",
-    "prisma": "^7.8.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
