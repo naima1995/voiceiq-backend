@@ -425,4 +425,82 @@ router.post('/twilio/status', async (req, res) => {
 });
 
 
+// ─── POST /api/webhooks/test/booking — test calendar booking without a live call ──
+router.post('/test/booking', async (req, res) => {
+  try {
+    const {
+      fname       = 'Test',
+      lname       = 'Lead',
+      phone       = '07700900000',
+      provider    = 'Aviva',
+      address     = '12 Oak Street',
+      town        = 'Manchester',
+      postcode    = 'M1 1AA',
+      agentName   = 'Alice',
+      startTime,           // ISO 8601 e.g. "2026-06-20T14:00:00" — defaults to tomorrow 14:00
+      notes       = 'Test booking created via /test/booking endpoint',
+    } = req.body;
+
+    // Resolve booking time
+    let callbackTime = startTime && !isNaN(Date.parse(startTime))
+      ? new Date(startTime)
+      : (() => {
+          const t = new Date();
+          t.setDate(t.getDate() + 1);
+          t.setHours(14, 0, 0, 0);
+          if (t.getDay() === 6) t.setDate(t.getDate() + 2);
+          if (t.getDay() === 0) t.setDate(t.getDate() + 1);
+          return t;
+        })();
+
+    const toUKDate = (d) => d.toLocaleDateString('en-GB',  { timeZone: 'Europe/London' });
+    const toUKTime = (d) => d.toLocaleTimeString('en-GB', {
+      timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: true,
+    }).toUpperCase();
+
+    const now             = new Date();
+    const callDateStr     = toUKDate(now);
+    const callTimeStr     = toUKTime(now);
+    const callbackDateStr = toUKDate(callbackTime);
+    const callbackTimeStr = toUKTime(callbackTime);
+
+    const task = await calendar.createTask({
+      title:   `Call Reminder — ${fname} ${lname}`.trim(),
+      dueTime: callbackTime.toISOString(),
+      notes: [
+        `TEST BOOKING — created via API (not a live call)`,
+        ``,
+        `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back on ${callbackDateStr} at ${callbackTimeStr}.`,
+        ``,
+        `First Name:          ${fname}`,
+        `Last Name:           ${lname}`,
+        `Current Provider:    ${provider}`,
+        `Address:             ${[address, town, postcode].filter(Boolean).join(', ')}`,
+        ``,
+        `Meeting/Call Date:   ${callbackDateStr}`,
+        `Meeting/Call Time:   ${callbackTimeStr}`,
+        ``,
+        `Mobile No:           ${phone}`,
+        ``,
+        `Booked by Agent:     ${agentName}`,
+        `AI Notes:            ${notes}`,
+      ].join('\n'),
+    });
+
+    logger.info('Test booking created', { taskId: task.taskId, callbackTime });
+
+    res.json({
+      success:      true,
+      taskId:       task.taskId,
+      htmlLink:     task.htmlLink,
+      bookedFor:    callbackTime.toISOString(),
+      callbackDate: callbackDateStr,
+      callbackTime: callbackTimeStr,
+    });
+  } catch (err) {
+    logger.error('Test booking failed', { error: err.message });
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
