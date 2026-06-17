@@ -13,13 +13,17 @@ const { errorHandler } = require('./middleware/errorHandler');
 const rateLimiter = require('./middleware/rateLimiter');
 
 // Routes
-const teamsRoutes   = require('./routes/teams');
 const twilioRoutes  = require('./routes/twilio');
+const authRoutes      = require('./routes/auth');
+const leadsRoutes     = require('./routes/leads');
+const campaignsRoutes   = require('./routes/campaigns');
+const promptAssistRoutes = require('./routes/promptAssist');
 const calendarRoutes = require('./routes/calendar');
 const voiceRoutes   = require('./routes/voice');
 const agentsRoutes  = require('./routes/agents');
 const callsRoutes   = require('./routes/calls');
 const webhookRoutes = require('./routes/webhooks');
+const knowledgeRoutes = require('./routes/knowledge');
 
 const app = express();
 app.set('trust proxy', 1); // Required for Railway/reverse proxy
@@ -60,8 +64,6 @@ app.use(morgan('combined', {
   stream: { write: (msg) => logger.http(msg.trim()) }
 }));
 
-// Raw body needed for Microsoft webhook validation
-app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -73,7 +75,6 @@ app.get('/health', (req, res) => {
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     integrations: {
-      teams: !!process.env.AZURE_CLIENT_ID,
       elevenlabs: !!process.env.ELEVENLABS_API_KEY,
       gemini: !!process.env.GEMINI_API_KEY,
       twilio: !!process.env.TWILIO_ACCOUNT_SID,
@@ -94,6 +95,9 @@ app.get('/api/calendar/oauth/callback', async (req, res) => {
   }
 });
 
+// ─── Auth (public — no rate limit) ───────────────────────────────────────
+app.use('/api/auth', authRoutes);
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────
 app.use('/api/', rateLimiter);
 
@@ -101,12 +105,15 @@ app.use('/api/', rateLimiter);
 app.use('/api/webhooks', webhookRoutes);
 
 // ─── Authenticated API Routes ─────────────────────────────────────────────
-app.use('/api/teams',    teamsRoutes);
 app.use('/api/twilio',   twilioRoutes);
+app.use('/api/leads',     leadsRoutes);
+app.use('/api/campaigns', campaignsRoutes);
+app.use('/api/prompt',   promptAssistRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/voice',    voiceRoutes);
 app.use('/api/agents',   agentsRoutes);
 app.use('/api/calls',    callsRoutes);
+app.use('/api/knowledge', knowledgeRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────
 app.use((req, res) => {

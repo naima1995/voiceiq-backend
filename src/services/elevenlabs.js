@@ -9,6 +9,7 @@ const VOICE_IDS = {
   rachel:  process.env.ELEVENLABS_VOICE_RACHEL  || '21m00Tcm4TlvDq8ikWAM',
   shelley: process.env.ELEVENLABS_VOICE_SHELLEY || '',
   alexis:  process.env.ELEVENLABS_VOICE_ALEXIS  || '',
+  alice:   process.env.ELEVENLABS_VOICE_ALICE   || 'ZEt85AU1ui8Rr8FxNslW',
 };
 
 const headers = () => ({
@@ -42,14 +43,31 @@ const VOICE_SETTINGS = {
     style: 0.15,
     use_speaker_boost: true,
   },
+  alice: {
+    stability: 0.58,         // Natural British female
+    similarity_boost: 0.83,
+    style: 0.2,
+    use_speaker_boost: true,
+  },
 };
 
 // ─── Text to Speech — returns audio Buffer ────────────────────────────────
-async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_44100_128' }) {
+async function textToSpeech({ text, agentName = 'james', outputFormat = 'mp3_44100_128', agentSettings = null }) {
   const voiceId = VOICE_IDS[agentName.toLowerCase()];
   if (!voiceId) throw new Error(`No voice ID configured for agent "${agentName}" — set ELEVENLABS_VOICE_${agentName.toUpperCase()} in Railway Variables`);
 
-  const settings = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
+  const base = VOICE_SETTINGS[agentName.toLowerCase()] || VOICE_SETTINGS.james;
+
+  // Override stability and style from agent settings sliders (0–100 → 0.0–1.0)
+  const settings = agentSettings
+    ? {
+        ...base,
+        stability:        parseFloat(((agentSettings.stability  ?? 60) / 100).toFixed(2)),
+        style:            parseFloat(((agentSettings.voiceSpeed ?? 80) / 100).toFixed(2)),
+        similarity_boost: base.similarity_boost,
+        use_speaker_boost: true,
+      }
+    : base;
 
   logger.debug('ElevenLabs TTS request', { agentName, voiceId, chars: text.length });
 
@@ -117,17 +135,18 @@ function getVoiceMap() {
     rachel:  { id: VOICE_IDS.rachel,  name: 'Rachel',  accent: 'Southern British',          gender: 'Female' },
     shelley: { id: VOICE_IDS.shelley, name: 'Shelley', accent: 'Warm British Professional', gender: 'Female' },
     alexis:  { id: VOICE_IDS.alexis,  name: 'Alexis',  accent: 'Clear Confident British',   gender: 'Female' },
+    alice:   { id: VOICE_IDS.alice,   name: 'Alice',   accent: 'British Female',             gender: 'Female' },
   };
 }
 
 // ─── Add Natural Pauses via SSML-like markers ────────────────────────────
-// ElevenLabs respects <break> tags in turbo model
+// Keep pauses short — long breaks cause noticeable dead air on a phone call
 function addNaturalPauses(text) {
   return text
-    .replace(/\.\s+/g, '. <break time="400ms"/> ')
-    .replace(/\?\s+/g, '? <break time="300ms"/> ')
-    .replace(/,\s+/g, ', <break time="150ms"/> ')
-    .replace(/—/g, '<break time="250ms"/>');
+    .replace(/\.\s+/g, '. <break time="150ms"/> ')
+    .replace(/\?\s+/g, '? <break time="150ms"/> ')
+    .replace(/,\s+/g, ', <break time="75ms"/> ')
+    .replace(/—/g, '<break time="100ms"/>');
 }
 
 module.exports = {

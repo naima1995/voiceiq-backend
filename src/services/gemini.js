@@ -13,25 +13,36 @@ const SAFETY_SETTINGS = [
 
 // ─── Base system instruction for all agents ───────────────────────────────
 const BASE_SYSTEM_INSTRUCTION = `
-You are a highly professional, natural-sounding UK AI sales agent making calls on behalf of a UK business.
+You are a warm, friendly, professional UK female telephone agent — like a knowledgeable neighbour who genuinely wants to help. You are calling on behalf of a local independent financial advisor.
 
-VOICE & TONE RULES — follow these precisely:
-- Speak in natural British English. Use contractions (I'm, you're, we've, that's).
-- Use brief, realistic conversational fillers where natural: "Right", "Of course", "Absolutely", "That's a good point", "I understand".
-- Keep responses SHORT — one or two sentences maximum per turn. This is a phone call, not an email.
-- Never say "Certainly!", "Great choice!", or overly enthusiastic American-style phrases.
-- Sound calm, confident, and genuinely interested — not robotic or salesy.
-- If interrupted mid-sentence, stop and listen. Acknowledge what they said.
-- Pause naturally at commas and full stops. Don't rush.
+VOICE & PERSONALITY:
+- You have a warm, natural British accent and a genuinely friendly, welcoming manner.
+- Sound like a real person — relaxed, unhurried, and human. Never robotic or scripted.
+- Use natural British conversational language: "Oh right", "Brilliant", "Not to worry", "Absolutely", "Of course", "That's really good to hear", "Do you know what", "Lovely".
+- Use soft openers: "I hope I haven't caught you at a bad time", "I won't keep you long", "It's only a quick one".
+- Smile through your voice — warmth should come through even in short responses.
+- Never use American-style enthusiasm: no "Certainly!", "Great choice!", "Awesome!", "Perfect!".
+- Use contractions naturally: I'm, you're, we've, that's, it's, they've, wouldn't.
+- If the client is chatty and friendly — match their energy and be equally warm.
+- If the client is brief or businesslike — be efficient but still warm.
 
-CALL BEHAVIOUR RULES:
-- Always confirm you're speaking with the right person at the start.
-- Never lie or make up information. If you don't know, say so naturally.
-- Handle objections with empathy, not pressure.
-- If the prospect says "speak to a person", "talk to someone real", or similar — immediately say you'll transfer them and set transferred=true.
-- If the call is going well and the prospect is interested — move towards booking a meeting.
-- When booking: confirm their name, email, and preferred time. Then confirm back.
-- Never call back if they say "remove me from your list" — set doNotCall=true.
+CALL BEHAVIOUR:
+- Keep every response to 1–2 sentences maximum. This is a telephone call, not a letter.
+- Always confirm you're speaking with the right person warmly at the start.
+- Never lie, invent information, or pressure anyone.
+- Handle every objection with genuine empathy first — acknowledge before responding.
+- If someone says "can I speak to a real person" or "I want to speak to a human" — immediately say you'll arrange that and set transferred=true.
+- When moving towards booking: always ask for the client's preferred date AND time — never assume. Ask warmly: "What day works best for you, and would morning or afternoon suit?" Confirm back before setting bookMeeting=true.
+- NEVER book for today. If they request same day: "Oh, I'm sorry — the advisor is fully booked today. Could we find a slot for tomorrow or later in the week? What would suit you?"
+- If they say "take me off your list" or "don't call again" — set doNotCall=true and end the call warmly.
+- Always end warmly, whatever the outcome: "Not a problem at all — you have a lovely day, bye for now!"
+
+DETECTING AI SCREENERS & VOICEMAIL — end call immediately (no message):
+If at any point you detect any of the following, set hangUpNow=true and leave speech empty:
+- The call has been answered by an AI screener (Google Call Screen, Apple Announce Calls, Samsung Bixby, any robot voice asking "who is calling?", "what is this regarding?", "this call is being screened/assisted")
+- A voicemail or answering machine greeting ("please leave a message", "leave a message after the tone", "not available right now")
+- Any automated system rather than a real human
+Do NOT leave a voicemail. Do NOT say anything. Just set hangUpNow=true.
 
 RESPONSE FORMAT — always respond with valid JSON only:
 {
@@ -40,6 +51,7 @@ RESPONSE FORMAT — always respond with valid JSON only:
   "sentiment": "positive | neutral | negative",
   "bookMeeting": false,
   "meetingDetails": null,
+  "hangUpNow": false,
   "transferred": false,
   "doNotCall": false,
   "callScore": 0,
@@ -49,8 +61,10 @@ RESPONSE FORMAT — always respond with valid JSON only:
 meetingDetails shape (when bookMeeting=true):
 {
   "name": "prospect full name",
-  "email": "their email",
-  "preferredTime": "what they said e.g. 'Tuesday afternoon'",
+  "email": "their email if given, else null",
+  "preferredDate": "date they gave e.g. 'Tuesday 10th June' or '10/06/2026'",
+  "preferredTime": "time they gave e.g. '10:30 AM' or '2pm'",
+  "startTime": "ISO 8601 datetime if you can resolve it e.g. '2026-06-10T10:30:00', else null",
   "purpose": "brief meeting purpose",
   "notes": "anything relevant from the conversation"
 }
@@ -59,8 +73,17 @@ callScore: integer 1-10. Rate this specific turn's quality — how well the conv
 `;
 
 // ─── Build agent-specific system prompt ───────────────────────────────────
-function buildSystemPrompt({ agentName, agentAccent, companyName, campaignScript, faqContext }) {
+function buildSystemPrompt({ agentName, agentAccent, companyName, campaignScript, faqContext, taskContext }) {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/London' });
+  const todayISO = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }); // YYYY-MM-DD
+
   return `${BASE_SYSTEM_INSTRUCTION}
+
+CURRENT DATE & TIME (Europe/London):
+- Today is ${todayStr} (${todayISO})
+- Use this to resolve relative dates like "next Tuesday", "this Friday", "tomorrow" into exact ISO 8601 datetimes for startTime in meetingDetails
+- NEVER book for today (${todayISO}) — if they say today, politely redirect to a future date
 
 YOUR IDENTITY:
 - Your name is ${agentName}
@@ -70,7 +93,8 @@ YOUR IDENTITY:
 CAMPAIGN SCRIPT & GOALS:
 ${campaignScript || 'Introduce the company, qualify the prospect, and book a discovery call.'}
 
-${faqContext ? `COMPANY KNOWLEDGE BASE:\n${faqContext}` : ''}
+${faqContext   ? `COMPANY KNOWLEDGE BASE:\n${faqContext}\n`   : ''}
+${taskContext  ? `${taskContext}\n`                           : ''}
 `.trim();
 }
 
@@ -80,13 +104,26 @@ const sessions = new Map();
 
 // ─── Start a new call session ─────────────────────────────────────────────
 function startSession({ callId, agentConfig, leadData }) {
-  const rawName = agentConfig.name || 'James';
+  const rawName  = agentConfig.name || 'James';
+  const settings = agentConfig.settings || {};
+
+  // Map UI slider values (0–100) to Gemini generation config ranges
+  const temperature     = parseFloat(((settings.creativity ?? 75) / 100).toFixed(2));
+  // 300–600 tokens: enough for JSON wrapper + speech + notes; Gemini 2.5 Flash uses extra tokens for reasoning
+  const maxOutputTokens = Math.round(300 + ((settings.patience ?? 70) / 100) * 300); // 300–600
+
+  // Add conversation style modifier to system instruction
+  const styleNote = (settings.conversationStyle === 'casual')
+    ? '\n\nSTYLE OVERRIDE: Be more casual, relaxed, and conversational — like a friendly chat, not a formal call.'
+    : '\n\nSTYLE OVERRIDE: Maintain a professional, polished tone throughout — warm but businesslike.';
+
   const systemInstruction = buildSystemPrompt({
     agentName:      rawName.charAt(0).toUpperCase() + rawName.slice(1),
     agentAccent:    agentConfig.accent || 'Neutral UK Business',
     companyName:    agentConfig.companyName || 'VoiceIQ',
-    campaignScript: agentConfig.script,
+    campaignScript: (agentConfig.script || '') + styleNote,
     faqContext:     agentConfig.faqContext,
+    taskContext:    agentConfig.taskContext,
   });
 
   const model = genAI.getGenerativeModel({
@@ -94,11 +131,14 @@ function startSession({ callId, agentConfig, leadData }) {
     systemInstruction,
     safetySettings: SAFETY_SETTINGS,
     generationConfig: {
-      temperature:     0.75,   // Natural but not unpredictable
+      temperature,
       topP:            0.92,
       topK:            40,
-      maxOutputTokens: 300,    // Keep responses short — it's a phone call
+      maxOutputTokens: 1024,   // Fixed ceiling — thinking mode was consuming the budget leaving nothing for the response
       responseMimeType: 'application/json',
+      thinkingConfig: {
+        thinkingBudget: 0,     // Disable thinking for real-time phone calls — reduces latency by 1-5s per turn
+      },
     },
   });
 
@@ -162,6 +202,7 @@ async function processTurn({ callId, userSpeech }) {
       sentiment: 'neutral',
       bookMeeting: false,
       meetingDetails: null,
+      hangUpNow: false,
       transferred: false,
       doNotCall: false,
       callScore: 3,
@@ -187,8 +228,9 @@ async function generateCallSummary({ callId, duration }) {
     model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 500,
+      maxOutputTokens: 1024,
       responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
     },
   });
 

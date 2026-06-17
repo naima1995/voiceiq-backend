@@ -1,6 +1,8 @@
-const twilio = require('twilio');
+const twilio         = require('twilio');
 const { v4: uuidv4 } = require('uuid');
-const logger = require('../utils/logger');
+const logger         = require('../utils/logger');
+const normalisePhone    = require('../utils/normalisePhone');
+const { validatePhone } = require('../utils/normalisePhone');
 
 let client = null;
 
@@ -17,10 +19,18 @@ function getClient() {
 }
 
 // ─── Make outbound call ───────────────────────────────────────────────────
-async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadData = {} }) {
-  const c    = getClient();
+async function makeOutboundCall({ toNumber, fromNumber, agentId = 'rachel', leadData = {} }) {
+  const c      = getClient();
   const callId = uuidv4();
-  const from = fromNumber || process.env.TWILIO_PHONE_NUMBER;
+  const from   = fromNumber || process.env.TWILIO_PHONE_NUMBER;
+
+  // Normalise then validate — reject if not a UK mobile (+447...)
+  toNumber = normalisePhone(toNumber);
+  const validation = validatePhone(toNumber);
+  if (!validation.valid) {
+    throw new Error(`Invalid phone number: ${validation.reason}`);
+  }
+  toNumber = validation.number;
 
   if (!from) throw new Error('No from number — set TWILIO_PHONE_NUMBER in Railway Variables');
 
@@ -28,8 +38,19 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadD
   const params = new URLSearchParams({
     agentId,
     callId,
-    leadName:    leadData.name    || '',
-    leadCompany: leadData.company || '',
+    leadName:     leadData.name      || '',
+    leadCompany:  leadData.company   || '',
+    leadFname:    leadData.fname     || leadData.firstName || '',
+    leadLname:    leadData.lname     || leadData.lastName  || '',
+    leadDob:      leadData.dob       || leadData.age       || '',
+    leadPhone:    toNumber,
+    leadAddr1:    leadData.address   || '',
+    leadAddr2:    leadData.address2  || '',
+    leadAddr3:    leadData.address3  || '',
+    leadTown:     leadData.town      || '',
+    leadCountry:  leadData.country   || '',
+    leadPost:     leadData.postcode  || '',
+    leadProvider: leadData.provider  || '',
   });
 
   const call = await c.calls.create({
@@ -38,7 +59,14 @@ async function makeOutboundCall({ toNumber, fromNumber, agentId = 'james', leadD
     url:            `${base}/api/webhooks/twilio/answer?${params}`,
     statusCallback: `${base}/api/webhooks/twilio/status`,
     statusCallbackMethod: 'POST',
-    statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed', 'failed', 'no-answer', 'busy'],
+    statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed'],
+    // ── Answering Machine Detection ───────────────────────────────────────
+    // Detects voicemail / answering machines before the agent speaks.
+    // 'Enable' = synchronous — Twilio waits up to 5s before connecting.
+    machineDetection:           'Enable',
+    machineDetectionTimeout:    5,       // seconds to wait for AMD result
+    asyncAmdStatusCallback:     `${base}/api/webhooks/twilio/amd`,
+    asyncAmdStatusCallbackMethod: 'POST',
   });
 
   logger.info('Twilio outbound call created', { callId, twilioSid: call.sid, toNumber, agentId });

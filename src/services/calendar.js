@@ -1,18 +1,6 @@
 const { google } = require('googleapis');
 const logger = require('../utils/logger');
-
-// ─── Token store — persists latest refresh token within this process ─────
-// On Railway, env vars are read-only at runtime. After a successful OAuth
-// callback the new refresh token is kept here so the process doesn't
-// immediately fall back to the stale env-var value.
-let _refreshToken = process.env.GOOGLE_REFRESH_TOKEN || null;
-
-function setRefreshToken(token) {
-  if (token) {
-    _refreshToken = token;
-    logger.info('Google refresh token updated in memory — copy to GOOGLE_REFRESH_TOKEN in Railway to persist across restarts');
-  }
-}
+const configStore = require('../utils/configStore');
 
 // ─── OAuth2 Client ────────────────────────────────────────────────────────
 function getOAuthClient() {
@@ -22,16 +10,11 @@ function getOAuthClient() {
     process.env.GOOGLE_REDIRECT_URI
   );
 
-  if (_refreshToken) {
-    client.setCredentials({ refresh_token: _refreshToken });
+  // Use runtime config store (updated via OAuth UI flow)
+  const refreshToken = configStore.get('googleRefreshToken');
+  if (refreshToken) {
+    client.setCredentials({ refresh_token: refreshToken });
   }
-
-  // Keep in-memory token up to date when Google auto-refreshes the access token
-  client.on('tokens', (tokens) => {
-    if (tokens.refresh_token) {
-      setRefreshToken(tokens.refresh_token);
-    }
-  });
 
   return client;
 }
@@ -46,10 +29,11 @@ function getOAuthUrl() {
   const client = getOAuthClient();
   return client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'select_account consent', // always show account picker, then consent
     scope: [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/tasks',
     ],
   });
 }
@@ -57,20 +41,10 @@ function getOAuthUrl() {
 async function handleOAuthCallback(code) {
   const client = getOAuthClient();
   const { tokens } = await client.getToken(code);
-
-  if (tokens.refresh_token) {
-    setRefreshToken(tokens.refresh_token);
-    // Print clearly so it can be copied into Railway
-    logger.info('Google OAuth success — UPDATE Railway variable GOOGLE_REFRESH_TOKEN', {
-      refresh_token: tokens.refresh_token,
-    });
-  } else {
-    // Google only returns refresh_token on first consent or after revocation.
-    // If missing here, revoke access at https://myaccount.google.com/permissions
-    // and re-run the OAuth flow so Google issues a fresh token.
-    logger.warn('Google OAuth callback: no refresh_token returned. Revoke access and re-auth to get a new one.');
-  }
-
+  // Log refresh token — user must save this to .env as GOOGLE_REFRESH_TOKEN
+  logger.info('Google OAuth tokens received — save refresh_token to .env', {
+    hasRefreshToken: !!tokens.refresh_token,
+  });
   return tokens;
 }
 
@@ -230,6 +204,75 @@ async function bookMeeting({
   };
 }
 
+// ─── Create a Calendar Reminder (private event, no invites, no Meet link) ─
+async function createTask({ title, dueTime, notes, durationMins = 60 }) {
+  const calendar   = getCalendarClient();
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+  const startTime = new Date(dueTime);
+  const endTime   = new Date(startTime.getTime() + durationMins * 60 * 1000);
+
+  const event = {
+    summary:     title,
+    description: notes,
+    start: {
+      dateTime: startTime.toISOString(),
+      timeZone: 'Europe/London',
+    },
+    end: {
+      dateTime: endTime.toISOString(),
+      timeZone: 'Europe/London',
+    },
+    // Private — no attendees, no invites, no Meet link
+    visibility: 'private',
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: 15 },
+        { method: 'email', minutes: 60 },
+      ],
+    },
+  };
+
+  const response = await calendar.events.insert({
+    calendarId,
+    requestBody:  event,
+    sendUpdates:  'none', // never send emails
+    conferenceDataVersion: 0,
+  });
+
+  const created = response.data;
+  logger.info('Calendar reminder created', { eventId: created.id, title, start: startTime });
+
+  return {
+    taskId:   created.id,   // keep field name so webhooks.js needs no change
+    title:    created.summary,
+    due:      created.start.dateTime,
+    htmlLink: created.htmlLink || null,
+    status:   created.status,
+  };
+}
+
+// ─── Append call summary to an existing calendar event's description ──────
+async function updateTaskNotes(eventId, summaryText) {
+  const cal        = getCalendarClient();
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+  const existing = await cal.events.get({ calendarId, eventId });
+  const current  = existing.data.description || '';
+
+  const updated = current + '\n\n--- AI Call Summary ---\n' + summaryText;
+
+  await cal.events.patch({
+    calendarId,
+    eventId,
+    requestBody: { description: updated },
+    sendUpdates: 'none',
+  });
+
+  logger.info('Calendar event updated with call summary', { eventId });
+}
+
 // ─── Reschedule a Meeting ─────────────────────────────────────────────────
 async function rescheduleMeeting({ eventId, newStartTime, newEndTime, reason }) {
   const calendar = getCalendarClient();
@@ -347,6 +390,8 @@ module.exports = {
   handleOAuthCallback,
   getAvailableSlots,
   bookMeeting,
+  createTask,
+  updateTaskNotes,
   rescheduleMeeting,
   cancelMeeting,
   listUpcomingEvents,

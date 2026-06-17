@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const gemini = require('../services/gemini');
-const teams = require('../services/teams');
 const elevenlabs = require('../services/elevenlabs');
+const calendar = require('../services/calendar');
 const { emit } = require('../services/websocket');
 const { logCall } = require('./calls');
+const { getKnowledgeForAgent } = require('./knowledge');
+const { buildTaskContext, getAgent } = require('./agents');
 const logger = require('../utils/logger');
 const audioCache = require('../utils/audioCache');
 
@@ -15,53 +17,187 @@ function twiml(inner) {
 
 // ─── Twilio: call answered — generate greeting, start AI session ──────────
 router.post('/twilio/answer', async (req, res) => {
-  const { agentId = 'james', callId, leadName = '', leadCompany = '' } = req.query;
+  const {
+    agentId = 'rachel', callId,
+    leadName = '', leadCompany = '',
+    leadFname = '', leadLname = '', leadDob = '', leadPhone = '',
+    leadAddr1 = '', leadAddr2 = '', leadAddr3 = '',
+    leadTown = '', leadCountry = '', leadPost = '',
+    leadProvider = '',
+  } = req.query;
   const { CallSid, From, To } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
 
   try {
+    // Load agent config, knowledge base, and task instructions
+    const agentConfig = getAgent(agentId) || {};
+    const faqContext  = getKnowledgeForAgent(agentId);
+    const taskContext = buildTaskContext(agentId);
+
     gemini.startSession({
       callId: voiceiqCallId,
-      agentConfig: { name: agentId, companyName: process.env.COMPANY_NAME || 'VoiceIQ' },
-      leadData: { name: leadName, company: leadCompany, phoneNumber: From },
+      agentConfig: {
+        name:        agentConfig.name       || agentId,
+        accent:      agentConfig.accent     || 'Southern British',
+        companyName: agentConfig.companyName || process.env.COMPANY_NAME || 'VoiceIQ',
+        script:      agentConfig.script     || '',
+        settings:    agentConfig.settings   || null,
+        faqContext,
+        taskContext,
+      },
+      leadData: {
+        name:        leadName,
+        company:     leadCompany,
+        fname:       leadFname,
+        lname:       leadLname,
+        dob:         leadDob,
+        phoneNumber: leadPhone || From,
+        address:     leadAddr1,
+        address2:    leadAddr2,
+        address3:    leadAddr3,
+        town:        leadTown,
+        country:     leadCountry,
+        postcode:    leadPost,
+        provider:    leadProvider,
+        callStarted: new Date().toISOString(),
+      },
     });
 
-    const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: null });
+    // Build a context-rich first-turn trigger so Gemini knows who it's calling
+    const greeting = leadFname || leadLname || leadName || null;
+    const contextLines = [
+      greeting   ? `Client name: ${[leadFname, leadLname].filter(Boolean).join(' ') || leadName}` : null,
+      leadDob    ? `Client age/DOB: ${leadDob}` : null,
+      leadProvider ? `Client's current insurance provider: ${leadProvider}` : null,
+      leadPost   ? `Client postcode: ${leadPost}` : null,
+    ].filter(Boolean);
+
+    const firstTurnMessage = contextLines.length
+      ? `[CALL_CONNECTED]\nLead context:\n${contextLines.join('\n')}\n\nStart with your greeting now.`
+      : `[CALL_CONNECTED — start with your greeting now]`;
+
+    const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: firstTurnMessage });
     const audioBuffer = await elevenlabs.textToSpeech({
       text: elevenlabs.addNaturalPauses(aiResponse.speech),
       agentName: agentId,
+      agentSettings: agentConfig.settings || null,
     });
     const audioUrl  = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
-    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&callId=${encodeURIComponent(voiceiqCallId)}`;
+    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+    const answerUrl = `${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
 
     emit.callStarted({ callId: voiceiqCallId, twilioCallSid: CallSid, fromNumber: From, toNumber: To, agentId });
     logger.info('Twilio call answered', { voiceiqCallId, speech: aiResponse.speech });
 
     res.type('text/xml').send(twiml(`
-      <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
-      <Redirect method="POST">${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}</Redirect>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Play>${audioUrl}</Play>
+      </Gather>
+      <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
     logger.error('Twilio answer webhook error', { error: err.message });
-    res.type('text/xml').send(twiml(`<Say voice="Polly.Amy">Sorry, I'm having a technical issue. Please call back shortly.</Say><Hangup/>`));
+    const fallbackSpeechUrl = `${process.env.CALLBACK_BASE_URL}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(callId || '')}`;
+    res.type('text/xml').send(twiml(`
+      <Gather input="speech" action="${fallbackSpeechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Say language="en-GB">One moment please.</Say>
+      </Gather>
+      <Redirect method="POST">${fallbackSpeechUrl}</Redirect>
+    `));
   }
 });
 
+// ─── Twilio: AMD (Answering Machine Detection) callback ──────────────────
+// Fired async by Twilio when machineDetection result is ready.
+// If it's a machine/voicemail, end the call via REST immediately.
+router.post('/twilio/amd', async (req, res) => {
+  res.status(200).send(); // respond immediately
+  const { CallSid, AnsweredBy } = req.body;
+  // AnsweredBy values: 'human' | 'machine_start' | 'machine_end_beep' |
+  //                   'machine_end_silence' | 'machine_end_other' | 'fax' | 'unknown'
+  const isMachine = AnsweredBy && AnsweredBy.startsWith('machine');
+  const isFax     = AnsweredBy === 'fax';
+
+  if (isMachine || isFax) {
+    logger.info('AMD: machine/voicemail detected — ending call', { CallSid, AnsweredBy });
+    try {
+      const twilio = require('twilio');
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await client.calls(CallSid).update({ status: 'completed' });
+    } catch (err) {
+      logger.warn('AMD: failed to end call', { CallSid, error: err.message });
+    }
+  }
+});
+
+// ─── AI screener keyword detection ───────────────────────────────────────
+// Phrases used by Google Call Screen, Apple Announce Calls,
+// Samsung Bixby Text Call, and generic voicemail prompts.
+const AI_SCREENER_PATTERNS = [
+  // Google Call Screen
+  /who(?:'s| is) (?:calling|this)/i,
+  /what(?:'s| is) (?:this|the call) (?:regarding|about|for)/i,
+  /this call is being screened/i,
+  /google.*screen/i,
+  /can you tell me.*(?:calling|reason)/i,
+  // Apple Announce Calls / Call Screening
+  /(?:who are you|who is this|what is this regarding)/i,
+  /announce.*call/i,
+  // Samsung Bixby Text Call
+  /bixby/i,
+  /call assistant/i,
+  /text call/i,
+  /this call is being assisted/i,
+  // Generic voicemail / answering machine beep prompts
+  /please leave (?:a |your )?message/i,
+  /leave (?:a |your )?message after the (?:tone|beep)/i,
+  /not (?:available|here) right now/i,
+  /(?:record|leave) (?:a )?(?:message|voicemail)/i,
+  /speak after the (?:tone|beep)/i,
+  /no one is available/i,
+  /(?:voicemail|answering machine)/i,
+];
+
+function isAIScreenerOrVoicemail(speech) {
+  if (!speech) return false;
+  return AI_SCREENER_PATTERNS.some(pattern => pattern.test(speech));
+}
+
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
-  const { agentId = 'james', callId } = req.query;
+  const { agentId = 'rachel', callId, silence = '0' } = req.query;
   const { SpeechResult, CallSid } = req.body;
   const voiceiqCallId = callId || CallSid;
   const base = process.env.CALLBACK_BASE_URL;
-  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&callId=${encodeURIComponent(voiceiqCallId)}`;
+  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+  const agentConfig = getAgent(agentId) || {};
 
   try {
     if (!SpeechResult) {
+      const silenceCount = parseInt(silence, 10) || 0;
+      if (silenceCount >= 1) {
+        // Second consecutive silence — no one home, end the call cleanly
+        logger.info('No speech after 2 attempts — ending call', { voiceiqCallId });
+        gemini.endSession(voiceiqCallId);
+        return res.type('text/xml').send(twiml(`<Hangup/>`));
+      }
+      // First silence — give one more chance
+      const retryUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}&amp;silence=1`;
       return res.type('text/xml').send(twiml(`
-        <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
+        <Gather input="speech" action="${retryUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        </Gather>
+        <Redirect method="POST">${retryUrl}</Redirect>
       `));
+    }
+
+    // ── Screener / voicemail guard — hang up silently, no message ────────
+    if (isAIScreenerOrVoicemail(SpeechResult)) {
+      logger.info('AI screener or voicemail detected — ending call silently', {
+        voiceiqCallId, speech: SpeechResult,
+      });
+      gemini.endSession(voiceiqCallId);
+      return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
     emit.prospectSpeaking({ callId: voiceiqCallId, speech: SpeechResult });
@@ -70,10 +206,131 @@ router.post('/twilio/speech', async (req, res) => {
     const audioBuffer = await elevenlabs.textToSpeech({
       text: elevenlabs.addNaturalPauses(aiResponse.speech),
       agentName: agentId,
+      agentSettings: agentConfig.settings || null,
     });
     const audioUrl = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
 
     emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
+
+    // ── Create calendar task when AI confirms booking ─────────────────────
+    if (aiResponse.bookMeeting) {
+      const md      = aiResponse.meetingDetails || {};
+      const session = gemini.getSession(voiceiqCallId);
+      const lead    = session?.leadData || {};
+
+      try {
+        // Time of the original call (when agent spoke to client)
+        const callTime = lead.callStarted ? new Date(lead.callStarted) : new Date();
+
+        // Format helper — UK date DD/MM/YYYY and time HH:MM AM/PM
+        const toUKDate = (d) => d.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+        const toUKTime = (d) => d.toLocaleTimeString('en-GB', {
+          timeZone: 'Europe/London',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }).toUpperCase();
+
+        // Resolve callback/meeting time from AI-extracted fields
+        let callbackTime = null;
+
+        // 1. Best case: Gemini resolved a full ISO 8601 datetime
+        if (md.startTime && !isNaN(Date.parse(md.startTime))) {
+          callbackTime = new Date(md.startTime);
+        }
+
+        // 2. Fallback: combine preferredDate + preferredTime text
+        if (!callbackTime && md.preferredDate) {
+          const timePart  = md.preferredTime || '14:00';
+          const combined  = `${md.preferredDate} ${timePart}`;
+          const parsed    = Date.parse(combined);
+          if (!isNaN(parsed)) callbackTime = new Date(parsed);
+        }
+
+        // 3. Last resort: next working day at 14:00
+        const today = new Date(callTime);
+        today.setHours(0, 0, 0, 0);
+        if (!callbackTime || callbackTime <= today) {
+          const nextDay = new Date(callTime);
+          nextDay.setDate(nextDay.getDate() + 1);
+          nextDay.setHours(14, 0, 0, 0);
+          if (nextDay.getDay() === 6) nextDay.setDate(nextDay.getDate() + 2); // skip Saturday
+          if (nextDay.getDay() === 0) nextDay.setDate(nextDay.getDate() + 1); // skip Sunday
+          callbackTime = nextDay;
+          logger.warn('Could not resolve booking time from AI — pushed to next working day', {
+            voiceiqCallId,
+            startTime:     md.startTime,
+            preferredDate: md.preferredDate,
+            preferredTime: md.preferredTime,
+            rescheduled:   callbackTime,
+          });
+        }
+
+        const callDateStr     = toUKDate(callTime);
+        const callTimeStr     = toUKTime(callTime);
+        const callbackDateStr = toUKDate(callbackTime);
+        const callbackTimeStr = toUKTime(callbackTime);
+
+        // Build full address from lead fields
+        const addressParts = [
+          lead.address, lead.address2, lead.address3,
+          lead.town, lead.country, lead.postcode,
+        ].filter(Boolean);
+        const fullAddress = addressParts.join(', ') || 'Not provided';
+
+        const agentName = session?.agentConfig?.name || agentId;
+
+        const task = await calendar.createTask({
+          title:   `Call Reminder — ${lead.fname || md.name?.split(' ')[0] || 'Prospect'} ${lead.lname || md.name?.split(' ').slice(1).join(' ') || ''}`.trim(),
+          dueTime: callbackTime.toISOString(),
+          notes: [
+            `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back on ${callbackDateStr} at ${callbackTimeStr}.`,
+            ``,
+            `First Name:          ${lead.fname    || md.name?.split(' ')[0] || 'N/A'}`,
+            `Last Name:           ${lead.lname    || md.name?.split(' ').slice(1).join(' ') || 'N/A'}`,
+            `DOB:                 ${lead.dob      || 'N/A'}`,
+            `Current Provider:    ${lead.provider || 'N/A'}`,
+            `Address:             ${fullAddress}`,
+            ``,
+            `Meeting/Call Date:   ${callbackDateStr}`,
+            `Meeting/Call Time:   ${callbackTimeStr}`,
+            ``,
+            `Mobile No:           ${lead.phoneNumber || 'N/A'}`,
+            ``,
+            `Booked by Agent:     ${agentName}`,
+            `AI Notes:            ${md.notes || 'N/A'}`,
+          ].join('\n'),
+        });
+
+        if (session) session.bookingResult = task;
+
+        emit.meetingBooked({
+          callId:    voiceiqCallId,
+          taskId:    task.taskId,
+          name:      `${lead.fname || ''} ${lead.lname || ''}`.trim() || md.name,
+          date:      callbackDateStr,
+          time:      callbackTimeStr,
+          phone:     lead.phoneNumber,
+          agentName,
+        });
+
+        logger.info('Calendar task created during call', {
+          voiceiqCallId,
+          taskId: task.taskId,
+          name:   `${lead.fname} ${lead.lname}`,
+        });
+
+      } catch (bookErr) {
+        logger.error('Calendar task creation failed during call', { voiceiqCallId, error: bookErr.message });
+      }
+    }
+
+    // Gemini detected a screener/voicemail mid-call — hang up silently
+    if (aiResponse.hangUpNow) {
+      logger.info('Gemini flagged hangUpNow — ending call silently', { voiceiqCallId });
+      gemini.endSession(voiceiqCallId);
+      return res.type('text/xml').send(twiml(`<Hangup/>`));
+    }
 
     if (aiResponse.doNotCall) {
       return res.type('text/xml').send(twiml(`<Play>${audioUrl}</Play><Hangup/>`));
@@ -87,13 +344,20 @@ router.post('/twilio/speech', async (req, res) => {
     }
 
     res.type('text/xml').send(twiml(`
-      <Play>${audioUrl}</Play>
-      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" speechModel="phone_call" language="en-GB"></Gather>
-      <Redirect method="POST">${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}</Redirect>
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Play>${audioUrl}</Play>
+      </Gather>
+      <Redirect method="POST">${speechUrl}</Redirect>
     `));
   } catch (err) {
     logger.error('Twilio speech webhook error', { error: err.message });
-    res.type('text/xml').send(twiml(`<Say voice="Polly.Amy">One moment please.</Say><Pause length="1"/><Hangup/>`));
+    // On any error keep the call alive — re-gather rather than hang up
+    res.type('text/xml').send(twiml(`
+      <Gather input="speech" action="${speechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
+        <Say language="en-GB">Sorry, one moment.</Say>
+      </Gather>
+      <Redirect method="POST">${speechUrl}</Redirect>
+    `));
   }
 });
 
@@ -106,11 +370,33 @@ router.post('/twilio/status', async (req, res) => {
   if (['completed', 'failed', 'no-answer', 'busy', 'canceled'].includes(CallStatus)) {
     const duration = parseInt(CallDuration || 0);
     let summary = null;
+    let bookingResult = null;
     try {
+      // Grab booking result before session is destroyed
+      const session = gemini.getSession(CallSid);
+      bookingResult = session?.bookingResult || null;
+
       summary = await gemini.generateCallSummary({ callId: CallSid, duration });
+
+      // Append AI summary to the calendar event created during the call
+      if (summary && bookingResult?.taskId) {
+        const summaryLines = [
+          summary.summary     ? summary.summary                        : null,
+          summary.outcome     ? `\nOutcome:     ${summary.outcome}`    : null,
+          summary.keyPoints?.length ? `\nKey Points:\n${summary.keyPoints.map(p => `  • ${p}`).join('\n')}` : null,
+          summary.objections?.length ? `\nObjections:\n${summary.objections.map(o => `  • ${o}`).join('\n')}` : null,
+          summary.nextAction  ? `\nNext Action: ${summary.nextAction}` : null,
+        ].filter(Boolean).join('\n');
+
+        calendar.updateTaskNotes(bookingResult.taskId, summaryLines).catch(err =>
+          logger.warn('Failed to update calendar task with summary', { error: err.message })
+        );
+      }
+
       gemini.endSession(CallSid);
     } catch (err) {
       logger.warn('Call summary failed', { error: err.message });
+      gemini.endSession(CallSid);
     }
 
     logCall({
@@ -123,6 +409,14 @@ router.post('/twilio/status', async (req, res) => {
       endedAt:   new Date().toISOString(),
       summary,
       outcome:   summary?.outcome || CallStatus,
+      ...(bookingResult && {
+        booking: {
+          taskId:   bookingResult.taskId   || null,
+          eventId:  bookingResult.eventId  || null,
+          htmlLink: bookingResult.htmlLink || null,
+          due:      bookingResult.due      || bookingResult.start || null,
+        },
+      }),
     });
 
     emit.callEnded({ callId: CallSid, duration, status: CallStatus, channel: 'twilio' });
@@ -130,222 +424,83 @@ router.post('/twilio/status', async (req, res) => {
   }
 });
 
-// ─── Microsoft Teams Call Events ──────────────────────────────────────────
-router.post('/teams/call-events', async (req, res) => {
-  res.status(200).send(); // Microsoft requires immediate 200
 
-  let body;
+// ─── POST /api/webhooks/test/booking — test calendar booking without a live call ──
+router.post('/test/booking', async (req, res) => {
   try {
-    if (Buffer.isBuffer(req.body)) {
-      body = JSON.parse(req.body.toString('utf8'));
-    } else if (typeof req.body === 'string') {
-      body = JSON.parse(req.body);
-    } else {
-      body = req.body;
-    }
-  } catch {
-    logger.error('Teams webhook: could not parse body');
-    return;
+    const {
+      fname       = 'Test',
+      lname       = 'Lead',
+      phone       = '07700900000',
+      provider    = 'Aviva',
+      address     = '12 Oak Street',
+      town        = 'Manchester',
+      postcode    = 'M1 1AA',
+      agentName   = 'Alice',
+      startTime,           // ISO 8601 e.g. "2026-06-20T14:00:00" — defaults to tomorrow 14:00
+      notes       = 'Test booking created via /test/booking endpoint',
+    } = req.body;
+
+    // Resolve booking time
+    let callbackTime = startTime && !isNaN(Date.parse(startTime))
+      ? new Date(startTime)
+      : (() => {
+          const t = new Date();
+          t.setDate(t.getDate() + 1);
+          t.setHours(14, 0, 0, 0);
+          if (t.getDay() === 6) t.setDate(t.getDate() + 2);
+          if (t.getDay() === 0) t.setDate(t.getDate() + 1);
+          return t;
+        })();
+
+    const toUKDate = (d) => d.toLocaleDateString('en-GB',  { timeZone: 'Europe/London' });
+    const toUKTime = (d) => d.toLocaleTimeString('en-GB', {
+      timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: true,
+    }).toUpperCase();
+
+    const now             = new Date();
+    const callDateStr     = toUKDate(now);
+    const callTimeStr     = toUKTime(now);
+    const callbackDateStr = toUKDate(callbackTime);
+    const callbackTimeStr = toUKTime(callbackTime);
+
+    const task = await calendar.createTask({
+      title:   `Call Reminder — ${fname} ${lname}`.trim(),
+      dueTime: callbackTime.toISOString(),
+      notes: [
+        `TEST BOOKING — created via API (not a live call)`,
+        ``,
+        `Spoke to the client on ${callDateStr} at ${callTimeStr}, and the client requested a call back on ${callbackDateStr} at ${callbackTimeStr}.`,
+        ``,
+        `First Name:          ${fname}`,
+        `Last Name:           ${lname}`,
+        `Current Provider:    ${provider}`,
+        `Address:             ${[address, town, postcode].filter(Boolean).join(', ')}`,
+        ``,
+        `Meeting/Call Date:   ${callbackDateStr}`,
+        `Meeting/Call Time:   ${callbackTimeStr}`,
+        ``,
+        `Mobile No:           ${phone}`,
+        ``,
+        `Booked by Agent:     ${agentName}`,
+        `AI Notes:            ${notes}`,
+      ].join('\n'),
+    });
+
+    logger.info('Test booking created', { taskId: task.taskId, callbackTime });
+
+    res.json({
+      success:      true,
+      taskId:       task.taskId,
+      htmlLink:     task.htmlLink,
+      bookedFor:    callbackTime.toISOString(),
+      callbackDate: callbackDateStr,
+      callbackTime: callbackTimeStr,
+    });
+  } catch (err) {
+    logger.error('Test booking failed', { error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
-
-  const { value } = body;
-  if (!Array.isArray(value)) return;
-
-  for (const event of value) {
-    try {
-      await handleTeamsCallEvent(event);
-    } catch (err) {
-      logger.error('Teams call event handler error', { error: err.message });
-    }
-  }
-});
-
-// ─── Parse voiceiq context from clientContext field ───────────────────────
-// Supports both compact {v, a} and legacy {voiceiqCallId, agentId} shapes
-function parseCtx(clientContext) {
-  try {
-    const c = JSON.parse(clientContext || '{}');
-    return {
-      voiceiqCallId: c.voiceiqCallId || c.v,
-      agentId:       c.agentId       || c.a,
-      leadData:      c.leadData      || {},
-    };
-  } catch { return {}; }
-}
-
-// ─── Build a public audio URL from ElevenLabs buffer ─────────────────────
-async function buildAudioUrl(text, agentName) {
-  const audioBuffer = await elevenlabs.textToSpeech({
-    text: elevenlabs.addNaturalPauses(text),
-    agentName,
-  });
-  return `${process.env.CALLBACK_BASE_URL}/api/voice/audio/${audioCache.store(audioBuffer)}`;
-}
-
-// ─── Main Teams event dispatcher ─────────────────────────────────────────
-async function handleTeamsCallEvent(event) {
-  const { resourceData } = event;
-  if (!resourceData) return;
-
-  const teamsCallId = resourceData.id;
-  const { voiceiqCallId, agentId } = parseCtx(resourceData.clientContext);
-  const agentName = (agentId || 'james').toLowerCase();
-
-  // ── recognizeAsync completed — prospect has spoken ──────────────────────
-  if (resourceData.recognizeResult) {
-    await handleRecognizeCompleted({ teamsCallId, voiceiqCallId, agentName, recognizeResult: resourceData.recognizeResult });
-    return;
-  }
-
-  const callState = resourceData.state;
-  logger.info('Teams call event', { teamsCallId, callState, voiceiqCallId });
-
-  switch (callState) {
-
-    case 'establishing':
-      emit.callStarted({ callId: voiceiqCallId, teamsCallId, state: 'ringing' });
-      break;
-
-    // ── Call connected — start AI session, play greeting, start listening ──
-    case 'established': {
-      emit.callStarted({ callId: voiceiqCallId, teamsCallId, state: 'connected' });
-
-      gemini.startSession({
-        callId: voiceiqCallId,
-        agentConfig: {
-          name: agentName,
-          companyName: process.env.COMPANY_NAME || 'VoiceIQ',
-        },
-        leadData: parseCtx(resourceData.clientContext).leadData || {},
-      });
-
-      const aiResponse = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: null });
-      const audioUrl   = await buildAudioUrl(aiResponse.speech, agentName);
-
-      emit.agentSpeaking({ callId: voiceiqCallId, teamsCallId, speech: aiResponse.speech, intent: aiResponse.intent });
-      logger.info('Teams call established — playing greeting', { voiceiqCallId, speech: aiResponse.speech });
-
-      await teams.recognizeAsync({
-        teamsCallId,
-        audioUrl,
-        clientContext: JSON.stringify({ voiceiqCallId, agentId }),
-      });
-      break;
-    }
-
-    // ── Call ended ─────────────────────────────────────────────────────────
-    case 'terminated': {
-      const duration = resourceData.durationInSeconds || 0;
-      let summary = null;
-
-      if (voiceiqCallId) {
-        try {
-          summary = await gemini.generateCallSummary({ callId: voiceiqCallId, duration });
-          gemini.endSession(voiceiqCallId);
-        } catch (err) {
-          logger.warn('Call summary failed', { error: err.message });
-        }
-      }
-
-      const callRecord = {
-        callId: voiceiqCallId, teamsCallId,
-        direction: 'outbound', channel: 'teams',
-        agentId: agentName, duration,
-        endedAt: new Date().toISOString(), summary,
-      };
-
-      logCall(callRecord);
-      emit.callEnded(callRecord);
-      if (summary) emit.callSummary({ callId: voiceiqCallId, summary });
-      logger.info('Teams call terminated', { voiceiqCallId, duration, outcome: summary?.outcome });
-      break;
-    }
-
-    default:
-      logger.debug('Unhandled Teams call state', { callState, teamsCallId });
-  }
-}
-
-// ─── Handle recognizeAsync result — core AI conversation turn ─────────────
-async function handleRecognizeCompleted({ teamsCallId, voiceiqCallId, agentName, recognizeResult }) {
-  const recognitionType = recognizeResult.recognitionType;
-
-  // Extract speech text — Microsoft returns it in different shapes
-  const speechText = recognizeResult.speech?.speech
-    || recognizeResult.speech?.text
-    || recognizeResult.speechResult?.text
-    || '';
-
-  logger.info('Teams recognize completed', { teamsCallId, recognitionType, speechText });
-
-  // No speech detected — reprompt gently
-  if (!speechText || ['timeout', 'completedSilenceDetected', 'failed'].includes(recognitionType)) {
-    logger.info('No speech detected, reprompting', { teamsCallId });
-    const audioUrl = await buildAudioUrl("I'm sorry, I didn't catch that — could you say that again?", agentName);
-    await teams.recognizeAsync({ teamsCallId, audioUrl, clientContext: JSON.stringify({ voiceiqCallId, agentId: agentName }) });
-    return;
-  }
-
-  emit.prospectSpeaking({ callId: voiceiqCallId, speech: speechText });
-
-  const aiResponse = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: speechText });
-  emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
-
-  const audioUrl = await buildAudioUrl(aiResponse.speech, agentName);
-
-  // Prospect asked to be removed from calling list
-  if (aiResponse.doNotCall) {
-    await teams.playAudioPrompt({ teamsCallId, audioUrl });
-    setTimeout(() => teams.endCall(teamsCallId).catch(() => {}), 5000);
-    return;
-  }
-
-  // Transfer to human agent
-  if (aiResponse.transferred) {
-    await teams.playAudioPrompt({ teamsCallId, audioUrl });
-    if (process.env.TEAMS_TRANSFER_USER_ID) {
-      await teams.transferCallToHuman({ teamsCallId, targetUserId: process.env.TEAMS_TRANSFER_USER_ID });
-    } else {
-      setTimeout(() => teams.endCall(teamsCallId).catch(() => {}), 5000);
-    }
-    emit.callTransferred({ callId: voiceiqCallId, teamsCallId });
-    return;
-  }
-
-  // Continue conversation — play response and listen again
-  await teams.recognizeAsync({
-    teamsCallId,
-    audioUrl,
-    clientContext: JSON.stringify({ voiceiqCallId, agentId: agentName }),
-  });
-}
-
-// ─── Microsoft Graph Change Notifications validation ──────────────────────
-// Microsoft sends a validationToken on initial subscription — must echo back
-router.post('/teams/subscribe', (req, res) => {
-  const { validationToken } = req.query;
-  if (validationToken) {
-    logger.info('Microsoft webhook validation', { validationToken });
-    return res.status(200).contentType('text/plain').send(validationToken);
-  }
-  res.status(200).send();
-});
-
-// ─── Inbound call notification ────────────────────────────────────────────
-// Fired when someone calls your Teams number
-router.post('/teams/inbound', async (req, res) => {
-  res.status(200).send();
-
-  const { callId, from, to } = req.body;
-  logger.info('Inbound Teams call', { callId, from, to });
-
-  emit.callStarted({
-    callId,
-    fromNumber: from,
-    toNumber:   to,
-    direction:  'inbound',
-    channel:    'teams',
-  });
 });
 
 module.exports = router;
