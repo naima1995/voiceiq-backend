@@ -62,6 +62,10 @@ router.get('/oauth/callback', async (req, res) => {
             <div class="icon">✅</div>
             <h2>Google Calendar Connected</h2>
             <p class="email">${email || 'Account linked'}</p>
+            ${tokens.refresh_token ? `
+            <p style="margin-top:1.5rem;color:#9ca3af;font-size:0.85rem;">Save this refresh token in Railway as <strong>GOOGLE_REFRESH_TOKEN</strong> so it persists across deploys:</p>
+            <textarea readonly onclick="this.select()" style="margin-top:0.5rem;width:100%;max-width:600px;padding:0.5rem;background:#1f2937;color:#34d399;border:1px solid #374151;border-radius:6px;font-family:monospace;font-size:0.8rem;resize:none;" rows="3">${tokens.refresh_token}</textarea>
+            ` : ''}
             <p style="margin-top:1rem;">You can close this tab and return to VoiceIQ.</p>
           </div>
         </body>
