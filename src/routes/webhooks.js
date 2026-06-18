@@ -202,9 +202,9 @@ router.post('/twilio/speech', async (req, res) => {
 
     emit.prospectSpeaking({ callId: voiceiqCallId, speech: SpeechResult });
 
-    const aiResponse  = await gemini.processTurn({ callId: voiceiqCallId, userSpeech: SpeechResult });
-    const audioBuffer = await elevenlabs.textToSpeech({
-      text: elevenlabs.addNaturalPauses(aiResponse.speech),
+    const { aiResponse, audioBuffer } = await gemini.processTurnWithAudio({
+      callId: voiceiqCallId,
+      userSpeech: SpeechResult,
       agentName: agentId,
       agentSettings: agentConfig.settings || null,
     });

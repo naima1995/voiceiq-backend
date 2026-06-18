@@ -1,5 +1,6 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-const logger = require('../utils/logger');
+const logger    = require('../utils/logger');
+const elevenlabs = require('./elevenlabs');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -212,6 +213,105 @@ async function processTurn({ callId, userSpeech }) {
   }
 }
 
+// ─── Process turn + generate TTS audio in parallel ───────────────────────
+// Streams Gemini's response, extracts the "speech" field as soon as it
+// appears in the stream, fires ElevenLabs immediately — rather than waiting
+// for the full JSON before starting TTS. Saves ~300–600ms per turn.
+async function processTurnWithAudio({ callId, userSpeech, agentName, agentSettings }) {
+  const session = sessions.get(callId);
+  if (!session) throw new Error(`No active session for callId: ${callId}`);
+
+  session.turnCount++;
+  const message = userSpeech || '[CALL_CONNECTED — start with your greeting now]';
+
+  const FALLBACK = {
+    speech: "I do apologise, could you repeat that?",
+    intent: 'qualifying', sentiment: 'neutral',
+    bookMeeting: false, meetingDetails: null,
+    hangUpNow: false, transferred: false, doNotCall: false,
+    callScore: 3, notes: 'Parse error — fallback used',
+  };
+
+  let rawText = '';
+  let audioBuffer = null;
+  let ttsStarted = false;
+  let ttsPromise = null;
+
+  // Helper: extract "speech": "..." from partial JSON as it streams in
+  function extractSpeech(partial) {
+    const m = partial.match(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    return m ? m[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').trim() : null;
+  }
+
+  try {
+    const streamResult = await session.chat.sendMessageStream(message);
+
+    for await (const chunk of streamResult.stream) {
+      const chunkText = chunk.text();
+      rawText += chunkText;
+
+      // As soon as we have a complete speech field, fire ElevenLabs
+      if (!ttsStarted) {
+        const speech = extractSpeech(rawText);
+        if (speech && speech.length > 10) {
+          ttsStarted = true;
+          logger.debug('Speech field extracted from stream — starting TTS in parallel', { callId, chars: speech.length });
+          ttsPromise = elevenlabs.textToSpeech({
+            text: elevenlabs.addNaturalPauses(speech),
+            agentName,
+            agentSettings,
+          }).catch(err => {
+            logger.warn('Parallel TTS failed — will retry after full parse', { error: err.message });
+            return null;
+          });
+        }
+      }
+    }
+
+    // Full response received — parse complete JSON
+    const cleaned = rawText.replace(/```json|```/gi, '').trim();
+    const parsed  = JSON.parse(cleaned);
+
+    // Wait for TTS if it was started (likely already done), otherwise start now
+    if (ttsPromise) {
+      audioBuffer = await ttsPromise;
+    }
+    if (!audioBuffer) {
+      audioBuffer = await elevenlabs.textToSpeech({
+        text: elevenlabs.addNaturalPauses(parsed.speech),
+        agentName,
+        agentSettings,
+      });
+    }
+
+    // Update session state
+    session.history.push({ role: 'user',  content: message,       ts: new Date().toISOString() });
+    session.history.push({ role: 'agent', content: parsed.speech, intent: parsed.intent, ts: new Date().toISOString() });
+    session.totalScore      += parsed.callScore || 5;
+    session.overallSentiment = parsed.sentiment;
+
+    logger.debug('Gemini+TTS parallel complete', { callId, intent: parsed.intent, ttsStartedEarly: ttsStarted });
+
+    return { aiResponse: parsed, audioBuffer };
+
+  } catch (err) {
+    logger.error('processTurnWithAudio error', { callId, error: err.message });
+
+    // Fallback TTS for the error phrase
+    try {
+      audioBuffer = await elevenlabs.textToSpeech({
+        text: FALLBACK.speech,
+        agentName,
+        agentSettings,
+      });
+    } catch (ttsErr) {
+      logger.error('Fallback TTS also failed', { error: ttsErr.message });
+    }
+
+    return { aiResponse: FALLBACK, audioBuffer };
+  }
+}
+
 // ─── Generate call summary after call ends ────────────────────────────────
 async function generateCallSummary({ callId, duration }) {
   const session = sessions.get(callId);
@@ -357,6 +457,7 @@ function getActiveSessions() {
 module.exports = {
   startSession,
   processTurn,
+  processTurnWithAudio,
   generateCallSummary,
   analyseSentiment,
   generateObjectionResponse,
