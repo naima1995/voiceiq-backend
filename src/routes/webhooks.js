@@ -262,32 +262,66 @@ router.post('/twilio/speech', async (req, res) => {
           hour12: true,
         }).toUpperCase();
 
+        // Convert a naive "YYYY-MM-DD" + "HH:MM" (or "2pm", "14:00") to a UTC Date
+        // representing that clock time in the Europe/London timezone (handles BST/GMT).
+        function parseLondonLocalTime(dateStr, timeStr) {
+          // Normalise time: "2pm" → "14:00", "9:30am" → "09:30", "14:00" → "14:00"
+          const clean = (timeStr || '14:00').trim();
+          const m = clean.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+          let hhmm = clean;
+          if (m) {
+            let hr = parseInt(m[1], 10);
+            const min = m[2] || '00';
+            const ap  = (m[3] || '').toLowerCase();
+            if (ap === 'pm' && hr < 12) hr += 12;
+            if (ap === 'am' && hr === 12) hr = 0;
+            hhmm = `${String(hr).padStart(2, '0')}:${min}`;
+          }
+          // Treat the naive datetime as UTC first, then find how far London is ahead
+          const probe   = new Date(`${dateStr}T${hhmm}:00Z`);
+          // What does London show for this UTC instant?
+          const repr    = probe.toLocaleString('en-CA', {
+            timeZone: 'Europe/London',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          }); // e.g. "2026-06-20, 15:00:00" when London is UTC+1
+          const londonAsUTC = new Date(repr.replace(', ', 'T') + 'Z');
+          const offsetMs    = londonAsUTC - probe; // positive = London ahead of UTC
+          return new Date(probe.getTime() - offsetMs); // London hhmm expressed in UTC
+        }
+
         // Resolve callback/meeting time from AI-extracted fields
         let callbackTime = null;
 
         // 1. Best case: Gemini resolved a full ISO 8601 datetime
         if (md.startTime && !isNaN(Date.parse(md.startTime))) {
-          callbackTime = new Date(md.startTime);
+          const s = md.startTime.trim();
+          // If Gemini omitted a timezone offset (no Z, no ±HH:MM), the bare string
+          // represents London local time — parse it correctly to avoid BST shift.
+          if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/[Z+\-]\d{2}:\d{2}$/.test(s) && !s.endsWith('Z')) {
+            const [datePart, timePart] = s.split('T');
+            callbackTime = parseLondonLocalTime(datePart, timePart.slice(0, 5));
+          } else {
+            callbackTime = new Date(s);
+          }
         }
 
         // 2. Fallback: combine preferredDate + preferredTime text
         if (!callbackTime && md.preferredDate) {
-          const timePart  = md.preferredTime || '14:00';
-          const combined  = `${md.preferredDate} ${timePart}`;
-          const parsed    = Date.parse(combined);
-          if (!isNaN(parsed)) callbackTime = new Date(parsed);
+          callbackTime = parseLondonLocalTime(md.preferredDate, md.preferredTime || '14:00');
         }
 
-        // 3. Last resort: next working day at 14:00
+        // 3. Last resort: next working day at 14:00 London time
         const today = new Date(callTime);
         today.setHours(0, 0, 0, 0);
         if (!callbackTime || callbackTime <= today) {
           const nextDay = new Date(callTime);
           nextDay.setDate(nextDay.getDate() + 1);
-          nextDay.setHours(14, 0, 0, 0);
-          if (nextDay.getDay() === 6) nextDay.setDate(nextDay.getDate() + 2); // skip Saturday
-          if (nextDay.getDay() === 0) nextDay.setDate(nextDay.getDate() + 1); // skip Sunday
-          callbackTime = nextDay;
+          if (nextDay.getDay() === 6) nextDay.setDate(nextDay.getDate() + 2);
+          if (nextDay.getDay() === 0) nextDay.setDate(nextDay.getDate() + 1);
+          // 14:00 London time on that day
+          const dateStr = nextDay.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+          callbackTime = parseLondonLocalTime(dateStr, '14:00');
           logger.warn('Could not resolve booking time from AI — pushed to next working day', {
             voiceiqCallId,
             startTime:     md.startTime,
