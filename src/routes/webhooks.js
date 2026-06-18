@@ -164,6 +164,27 @@ function isAIScreenerOrVoicemail(speech) {
   return AI_SCREENER_PATTERNS.some(pattern => pattern.test(speech));
 }
 
+// ─── Prospect farewell detection ──────────────────────────────────────────
+// Catches unambiguous farewells before hitting Gemini — deterministic,
+// zero latency, prevents the agent restarting the script on a goodbye.
+const FAREWELL_PATTERNS = [
+  /^(?:bye|goodbye|good-?bye|ta-?ta)[.!]?$/i,
+  /^(?:ok|okay|alright|right)[,.]?\s+bye[.!]?$/i,
+  /(?:bye[- ]bye|cheerio|cheers[,.]?\s*bye)/i,
+  /(?:thanks?|thank you)[,.]?\s+(?:bye|goodbye|take care)[.!]?/i,
+  /(?:not (?:interested|for me)|no thanks?)[,.]?\s+(?:bye|goodbye|cheers)[.!]?/i,
+  /(?:have (?:a ))?(?:good|lovely|nice|great)\s+(?:day|evening|night|weekend)[.!]?$/i,
+  /(?:speak|talk)(?: to you)?\s+(?:soon|later)[.!]?$/i,
+  /(?:i[''']?(?:ll|ve got to|have to|gotta|must) (?:go|head off|shoot|dash|run))/i,
+  /(?:no[,.]?\s+)?(?:i[''']?m (?:not |no longer )?interested|remove (?:me|my number)|don[''']?t (?:call|ring) (?:me |us )?again)/i,
+];
+
+function isProspectFarewell(speech) {
+  if (!speech) return false;
+  const s = speech.trim();
+  return FAREWELL_PATTERNS.some(p => p.test(s));
+}
+
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
   const { agentId = 'rachel', callId, silence = '0' } = req.query;
@@ -196,6 +217,16 @@ router.post('/twilio/speech', async (req, res) => {
       logger.info('AI screener or voicemail detected — ending call silently', {
         voiceiqCallId, speech: SpeechResult,
       });
+      gemini.endSession(voiceiqCallId);
+      return res.type('text/xml').send(twiml(`<Hangup/>`));
+    }
+
+    // ── Farewell guard — prospect clearly ending the call ────────────────
+    if (isProspectFarewell(SpeechResult)) {
+      logger.info('Prospect farewell detected — ending call cleanly', {
+        voiceiqCallId, speech: SpeechResult,
+      });
+      emit.prospectSpeaking({ callId: voiceiqCallId, speech: SpeechResult });
       gemini.endSession(voiceiqCallId);
       return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
