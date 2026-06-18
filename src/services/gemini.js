@@ -109,8 +109,9 @@ function startSession({ callId, agentConfig, leadData }) {
 
   // Map UI slider values (0–100) to Gemini generation config ranges
   const temperature     = parseFloat(((settings.creativity ?? 75) / 100).toFixed(2));
-  // 300–600 tokens: enough for JSON wrapper + speech + notes; Gemini 2.5 Flash uses extra tokens for reasoning
-  const maxOutputTokens = Math.round(300 + ((settings.patience ?? 70) / 100) * 300); // 300–600
+  // 400–800 tokens: patience slider controls response length. thinkingBudget:0 means no reasoning
+  // tokens are consumed, so we can safely use the slider value without a fixed ceiling override.
+  const maxOutputTokens = Math.round(400 + ((settings.patience ?? 70) / 100) * 400); // 400–800
 
   // Add conversation style modifier to system instruction
   const styleNote = (settings.conversationStyle === 'casual')
@@ -134,7 +135,7 @@ function startSession({ callId, agentConfig, leadData }) {
       temperature,
       topP:            0.92,
       topK:            40,
-      maxOutputTokens: 1024,   // Fixed ceiling — thinking mode was consuming the budget leaving nothing for the response
+      maxOutputTokens,
       responseMimeType: 'application/json',
       thinkingConfig: {
         thinkingBudget: 0,     // Disable thinking for real-time phone calls — reduces latency by 1-5s per turn

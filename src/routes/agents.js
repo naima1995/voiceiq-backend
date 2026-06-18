@@ -1,5 +1,7 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
+const prisma  = require('../utils/prisma');
+const logger  = require('../utils/logger');
 
 // ─── Default protection survey script ────────────────────────────────────────
 const DEFAULT_PROTECTION_SCRIPT = `
@@ -160,6 +162,85 @@ const agents = new Map([
   }],
 ]);
 
+// ─── Persist agent settings to PostgreSQL ────────────────────────────────
+async function persistAgent(agent) {
+  try {
+    const s = agent.settings || {};
+    await prisma.agent.upsert({
+      where: { id: agent.id },
+      update: {
+        name:             agent.name,
+        accent:           agent.accent  || null,
+        gender:           agent.gender  || null,
+        status:           agent.status  || 'active',
+        voiceId:          agent.voiceId || null,
+        companyName:      agent.companyName || null,
+        script:           agent.script  || null,
+        faqContext:       agent.faqContext || null,
+        creativity:       s.creativity  ?? 75,
+        patience:         s.patience    ?? 70,
+        stability:        s.stability   ?? 60,
+        voiceSpeed:       s.voiceSpeed  ?? 80,
+        conversationStyle: s.conversationStyle || 'formal',
+      },
+      create: {
+        id:               agent.id,
+        name:             agent.name,
+        accent:           agent.accent  || null,
+        gender:           agent.gender  || null,
+        status:           agent.status  || 'active',
+        voiceId:          agent.voiceId || null,
+        companyName:      agent.companyName || null,
+        script:           agent.script  || null,
+        faqContext:       agent.faqContext || null,
+        creativity:       s.creativity  ?? 75,
+        patience:         s.patience    ?? 70,
+        stability:        s.stability   ?? 60,
+        voiceSpeed:       s.voiceSpeed  ?? 80,
+        conversationStyle: s.conversationStyle || 'formal',
+      },
+    });
+  } catch (err) {
+    logger.warn('Failed to persist agent to DB', { id: agent.id, error: err.message });
+  }
+}
+
+// ─── Seed in-memory agents from DB on startup ─────────────────────────────
+// Runs once. For each agent in the DB, overwrites the in-memory defaults with
+// the last-saved settings so config survives Railway restarts.
+async function seedAgentsFromDB() {
+  try {
+    const rows = await prisma.agent.findMany();
+    rows.forEach(row => {
+      const existing = agents.get(row.id);
+      if (!existing) return; // don't create agents that no longer exist in code
+      agents.set(row.id, {
+        ...existing,
+        name:        row.name,
+        accent:      row.accent      || existing.accent,
+        gender:      row.gender      || existing.gender,
+        status:      row.status      || existing.status,
+        voiceId:     row.voiceId     || existing.voiceId,
+        companyName: row.companyName || existing.companyName,
+        script:      row.script      || existing.script,
+        faqContext:  row.faqContext  || existing.faqContext,
+        settings: {
+          creativity:        row.creativity,
+          patience:          row.patience,
+          stability:         row.stability,
+          voiceSpeed:        row.voiceSpeed,
+          conversationStyle: row.conversationStyle,
+        },
+      });
+    });
+    logger.info('Agents seeded from DB', { count: rows.length });
+  } catch (err) {
+    logger.warn('Could not seed agents from DB — using defaults', { error: err.message });
+  }
+}
+
+seedAgentsFromDB();
+
 // ─── Update agent stats when a call completes ─────────────────────────────
 function updateAgentStats(agentId, { outcome, score }) {
   const agent = agents.get(agentId);
@@ -217,6 +298,7 @@ router.post('/', (req, res) => {
   };
 
   agents.set(id, agent);
+  persistAgent(agent);
   res.status(201).json(agent);
 });
 
@@ -232,6 +314,7 @@ router.patch('/:id', (req, res) => {
 
   agent.updatedAt = new Date().toISOString();
   agents.set(req.params.id, agent);
+  persistAgent(agent);
   res.json(agent);
 });
 
