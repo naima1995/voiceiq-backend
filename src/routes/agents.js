@@ -283,9 +283,67 @@ function publicAgent(a) {
   return { ...a, stats: pub };
 }
 
-// ─── List all agents ──────────────────────────────────────────────────────
-router.get('/', (req, res) => {
-  res.json({ agents: Array.from(agents.values()).map(publicAgent) });
+// ─── List all agents — enrich with live DB stats ──────────────────────────
+router.get('/', async (req, res) => {
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Single query: all calls grouped by agentId for today
+    const todayCalls = await prisma.call.groupBy({
+      by: ['agentId'],
+      where: { loggedAt: { gte: todayStart } },
+      _count: { id: true },
+    });
+
+    const bookedToday = await prisma.call.groupBy({
+      by: ['agentId'],
+      where: {
+        loggedAt:  { gte: todayStart },
+        OR: [
+          { bookingId: { not: null } },
+          { outcome: 'meeting_booked' },
+        ],
+      },
+      _count: { id: true },
+    });
+
+    const answeredToday = await prisma.call.groupBy({
+      by: ['agentId'],
+      where: {
+        loggedAt: { gte: todayStart },
+        outcome:  { notIn: ['no_answer', 'no-answer'] },
+        status:   { not: 'no-answer' },
+      },
+      _count: { id: true },
+    });
+
+    // Build lookup maps
+    const callsMap    = Object.fromEntries(todayCalls.map(r   => [r.agentId, r._count.id]));
+    const bookedMap   = Object.fromEntries(bookedToday.map(r  => [r.agentId, r._count.id]));
+    const answeredMap = Object.fromEntries(answeredToday.map(r => [r.agentId, r._count.id]));
+
+    const result = Array.from(agents.values()).map(a => {
+      const calls    = callsMap[a.id]    || 0;
+      const booked   = bookedMap[a.id]   || 0;
+      const answered = answeredMap[a.id] || 0;
+      const { _scores, _answered, ...pub } = a.stats;
+      return {
+        ...a,
+        stats: {
+          ...pub,
+          callsToday:  calls,
+          bookings:    booked,
+          answerRate:  calls ? parseFloat((answered / calls).toFixed(2)) : 0,
+        },
+      };
+    });
+
+    res.json({ agents: result });
+  } catch (err) {
+    logger.warn('Failed to fetch agent stats from DB', { error: err.message });
+    res.json({ agents: Array.from(agents.values()).map(publicAgent) });
+  }
 });
 
 // ─── Get single agent ─────────────────────────────────────────────────────
