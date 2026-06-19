@@ -32,7 +32,7 @@ router.post('/twilio/answer', async (req, res) => {
   try {
     // Load agent config, knowledge base, and task instructions
     const agentConfig = getAgent(agentId) || {};
-    const faqContext  = getKnowledgeForAgent(agentId);
+    const faqContext  = await getKnowledgeForAgent(agentId);
     const taskContext = buildTaskContext(agentId);
 
     gemini.startSession({

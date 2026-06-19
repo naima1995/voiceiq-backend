@@ -3,6 +3,8 @@ const router   = express.Router();
 const multer   = require('multer');
 const path     = require('path');
 const logger   = require('../utils/logger');
+const { PrismaClient } = require('@prisma/client');
+const prisma   = new PrismaClient();
 
 // ─── NATO Phonetic Alphabet — built-in KB entry ───────────────────────────
 const PHONETIC_ALPHABET_CONTENT = `PHONETIC ALPHABET — USE WHEN CONFIRMING POSTCODES, NAMES, OR REFERENCE NUMBERS
@@ -53,24 +55,32 @@ USAGE RULES:
 5. If the client gives you a letter that sounds ambiguous (e.g. B/P, D/T, M/N), confirm using phonetics: "Was that B for Bravo or P for Papa?"
 `;
 
-// ─── In-memory store ──────────────────────────────────────────────────────
-const knowledgeBases = [
-  {
-    id:          1,
-    name:        'Phonetic Alphabet (Postcode Confirmation)',
-    description: 'NATO phonetic alphabet for confirming postcodes, names, and reference numbers on calls.',
-    agentId:     null,   // shared across all agents
-    type:        'text',
-    fileName:    'Built-in',
-    fileType:    'TEXT',
-    fileSize:    null,
-    charCount:   PHONETIC_ALPHABET_CONTENT.length,
-    content:     PHONETIC_ALPHABET_CONTENT,
-    builtin:     true,
-    createdAt:   new Date().toISOString(),
-  },
-];
-let nextId = 1000;
+// Seed the built-in NATO entry if it doesn't exist yet
+async function seedBuiltinKB() {
+  try {
+    const existing = await prisma.knowledgeBase.findFirst({ where: { builtin: true } });
+    if (!existing) {
+      await prisma.knowledgeBase.create({
+        data: {
+          name:        'Phonetic Alphabet (Postcode Confirmation)',
+          description: 'NATO phonetic alphabet for confirming postcodes, names, and reference numbers on calls.',
+          agentId:     null,
+          type:        'text',
+          fileName:    'Built-in',
+          fileType:    'TEXT',
+          fileSize:    null,
+          charCount:   PHONETIC_ALPHABET_CONTENT.length,
+          content:     PHONETIC_ALPHABET_CONTENT,
+          builtin:     true,
+        },
+      });
+      logger.info('Built-in NATO phonetic KB seeded to database');
+    }
+  } catch (err) {
+    logger.warn('Could not seed built-in KB — DB may not be ready yet', { error: err.message });
+  }
+}
+seedBuiltinKB();
 
 // ─── Multer — memory storage, 20MB limit ─────────────────────────────────
 const upload = multer({
@@ -116,7 +126,7 @@ async function parseFile(buffer, originalname) {
   throw new Error(`Cannot parse file type: ${ext}`);
 }
 
-// ─── Webpage fetcher ─────────────────────────────────────────────────────
+// ─── Webpage fetcher ──────────────────────────────────────────────────────
 async function fetchWebpage(url) {
   const axios = require('axios');
   const res = await axios.get(url, {
@@ -124,8 +134,7 @@ async function fetchWebpage(url) {
     headers: { 'User-Agent': 'VoiceIQ-KnowledgeBot/1.0' },
     maxContentLength: 5 * 1024 * 1024,
   });
-  // Strip HTML tags and collapse whitespace
-  const text = res.data
+  return res.data
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]+>/g, ' ')
@@ -135,23 +144,40 @@ async function fetchWebpage(url) {
     .replace(/&gt;/g, '>')
     .replace(/\s{2,}/g, '\n')
     .trim();
-  return text;
 }
 
 // ─── GET /api/knowledge — list all ───────────────────────────────────────
-router.get('/', (req, res) => {
-  const list = knowledgeBases.map(({ content, ...rest }) => rest); // omit full content from list
-  res.json({ knowledgeBases: list, total: list.length });
+router.get('/', async (req, res) => {
+  try {
+    const rows = await prisma.knowledgeBase.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true, name: true, description: true, agentId: true,
+        type: true, fileName: true, fileType: true, fileSize: true,
+        charCount: true, builtin: true, createdAt: true,
+        // content intentionally excluded from list
+      },
+    });
+    res.json({ knowledgeBases: rows, total: rows.length });
+  } catch (err) {
+    logger.error('Failed to list knowledge bases', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch knowledge bases' });
+  }
 });
 
 // ─── GET /api/knowledge/:id — get single with content ────────────────────
-router.get('/:id', (req, res) => {
-  const kb = knowledgeBases.find(k => k.id === parseInt(req.params.id));
-  if (!kb) return res.status(404).json({ error: 'Knowledge base not found' });
-  res.json(kb);
+router.get('/:id', async (req, res) => {
+  try {
+    const kb = await prisma.knowledgeBase.findUnique({ where: { id: parseInt(req.params.id) } });
+    if (!kb) return res.status(404).json({ error: 'Knowledge base not found' });
+    res.json(kb);
+  } catch (err) {
+    logger.error('Failed to fetch knowledge base', { error: err.message });
+    res.status(500).json({ error: 'Failed to fetch knowledge base' });
+  }
 });
 
-// ─── POST /api/knowledge — create (file / text / url) ────────────────────
+// ─── POST /api/knowledge — create (file / text / url / media) ────────────
 router.post('/', upload.single('file'), async (req, res) => {
   const { name, agentId, description, type = 'file', textContent, url } = req.body;
 
@@ -184,7 +210,6 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     } else if (type === 'media') {
       if (!req.file) return res.status(400).json({ error: 'Media file is required' });
-      // Store filename + placeholder — transcription can be wired to Whisper API later
       content  = `[Media file uploaded: ${req.file.originalname}]\n\nTranscription pending. File size: ${(req.file.size / 1024).toFixed(1)} KB.\n\nTo enable automatic transcription, connect a Whisper or Google Speech-to-Text API key in Settings.`;
       fileName = req.file.originalname;
       fileType = path.extname(req.file.originalname).toLowerCase().replace('.', '').toUpperCase();
@@ -197,60 +222,85 @@ router.post('/', upload.single('file'), async (req, res) => {
     return res.status(422).json({ error: `Content processing failed: ${err.message}` });
   }
 
-  const kb = {
-    id:          nextId++,
-    name:        name.trim(),
-    description: description?.trim() || '',
-    agentId:     agentId || null,
-    type:        type,
-    fileName,
-    fileType,
-    fileSize:    fileSize || null,
-    charCount:   content.length,
-    content,
-    createdAt:   new Date().toISOString(),
-  };
+  try {
+    const kb = await prisma.knowledgeBase.create({
+      data: {
+        name:        name.trim(),
+        description: description?.trim() || '',
+        agentId:     agentId || null,
+        type,
+        fileName,
+        fileType,
+        fileSize:    fileSize || null,
+        charCount:   content.length,
+        content,
+      },
+    });
 
-  knowledgeBases.unshift(kb);
-  logger.info('Knowledge base created', { id: kb.id, name: kb.name, type, agentId, chars: content.length });
-
-  const { content: _, ...response } = kb;
-  res.status(201).json(response);
+    logger.info('Knowledge base created', { id: kb.id, name: kb.name, type, agentId, chars: content.length });
+    const { content: _, ...response } = kb;
+    res.status(201).json(response);
+  } catch (err) {
+    logger.error('Failed to save knowledge base', { error: err.message });
+    res.status(500).json({ error: 'Failed to save knowledge base' });
+  }
 });
 
-// ─── PATCH /api/knowledge/:id — update name/agentId ──────────────────────
-router.patch('/:id', (req, res) => {
-  const kb = knowledgeBases.find(k => k.id === parseInt(req.params.id));
-  if (!kb) return res.status(404).json({ error: 'Knowledge base not found' });
+// ─── PATCH /api/knowledge/:id — update name / agentId / description ───────
+router.patch('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const kb = await prisma.knowledgeBase.findUnique({ where: { id } });
+    if (!kb) return res.status(404).json({ error: 'Knowledge base not found' });
 
-  if (req.body.name)        kb.name        = req.body.name.trim();
-  if (req.body.agentId !== undefined) kb.agentId = req.body.agentId;
-  if (req.body.description !== undefined) kb.description = req.body.description;
+    const updated = await prisma.knowledgeBase.update({
+      where: { id },
+      data: {
+        ...(req.body.name        !== undefined && { name:        req.body.name.trim() }),
+        ...(req.body.agentId     !== undefined && { agentId:     req.body.agentId }),
+        ...(req.body.description !== undefined && { description: req.body.description }),
+      },
+    });
 
-  logger.info('Knowledge base updated', { id: kb.id });
-  const { content: _, ...response } = kb;
-  res.json(response);
+    logger.info('Knowledge base updated', { id });
+    const { content: _, ...response } = updated;
+    res.json(response);
+  } catch (err) {
+    logger.error('Failed to update knowledge base', { error: err.message });
+    res.status(500).json({ error: 'Failed to update knowledge base' });
+  }
 });
 
 // ─── DELETE /api/knowledge/:id ────────────────────────────────────────────
-router.delete('/:id', (req, res) => {
-  const idx = knowledgeBases.findIndex(k => k.id === parseInt(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: 'Knowledge base not found' });
+router.delete('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const kb = await prisma.knowledgeBase.findUnique({ where: { id } });
+    if (!kb) return res.status(404).json({ error: 'Knowledge base not found' });
+    if (kb.builtin) return res.status(403).json({ error: 'Built-in knowledge bases cannot be deleted.' });
 
-  if (knowledgeBases[idx].builtin) {
-    return res.status(403).json({ error: 'Built-in knowledge bases cannot be deleted.' });
+    await prisma.knowledgeBase.delete({ where: { id } });
+    logger.info('Knowledge base deleted', { id, name: kb.name });
+    res.json({ deleted: true, id });
+  } catch (err) {
+    logger.error('Failed to delete knowledge base', { error: err.message });
+    res.status(500).json({ error: 'Failed to delete knowledge base' });
   }
-
-  const [removed] = knowledgeBases.splice(idx, 1);
-  logger.info('Knowledge base deleted', { id: removed.id, name: removed.name });
-  res.json({ deleted: true, id: removed.id });
 });
 
 // ─── Internal: get KB content for an agent (used by call session) ─────────
-function getKnowledgeForAgent(agentId) {
-  const kbs = knowledgeBases.filter(k => k.agentId === agentId || k.agentId === null);
-  if (!kbs.length) return null;
-  return kbs.map(k => `=== ${k.name} ===\n${k.content}`).join('\n\n');
+async function getKnowledgeForAgent(agentId) {
+  try {
+    const kbs = await prisma.knowledgeBase.findMany({
+      where: { OR: [{ agentId }, { agentId: null }] },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!kbs.length) return null;
+    return kbs.map(k => `=== ${k.name} ===\n${k.content}`).join('\n\n');
+  } catch (err) {
+    logger.warn('Failed to load knowledge bases for agent', { agentId, error: err.message });
+    return null;
+  }
 }
 
 module.exports = router;
