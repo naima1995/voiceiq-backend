@@ -79,23 +79,30 @@ router.get('/active/all', (req, res) => {
 
 // ─── GET /api/calls/analytics/summary ────────────────────────────────────────
 router.get('/analytics/summary', async (req, res) => {
-  const now       = new Date();
+  const now            = new Date();
+  // Boundary times in UTC — Railway runs UTC, UK is UTC+0/+1
   const todayStart     = new Date(now); todayStart.setHours(0,0,0,0);
   const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  const weekStart      = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 6); // last 7 days
 
   try {
-    const [todayCalls, yesterdayCalls, allTimeTotal] = await Promise.all([
+    const [todayCalls, yesterdayCalls, weekCalls, allTimeTotal] = await Promise.all([
       prisma.call.findMany({ where: { loggedAt: { gte: todayStart } } }),
       prisma.call.findMany({ where: { loggedAt: { gte: yesterdayStart, lt: todayStart } } }),
+      prisma.call.findMany({ where: { loggedAt: { gte: weekStart } }, orderBy: { loggedAt: 'asc' } }),
       prisma.call.count(),
     ]);
 
+    function isBooked(c) {
+      return c.bookingId || c.outcome === 'meeting_booked';
+    }
+
     function summarise(calls) {
-      const booked   = calls.filter(c => c.outcome === 'meeting_booked').length;
-      const answered = calls.filter(c => c.outcome !== 'no_answer').length;
+      const booked   = calls.filter(isBooked).length;
+      const answered = calls.filter(c => c.outcome !== 'no_answer' && c.outcome !== 'no-answer' && c.status !== 'no-answer').length;
       const summaries = calls.map(c => c.summary ? JSON.parse(c.summary) : null).filter(Boolean);
-      const scores   = summaries.filter(s => s?.avgCallScore).map(s => s.avgCallScore);
-      const avgScore = scores.length ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : 0;
+      const scores    = summaries.filter(s => s?.avgCallScore).map(s => s.avgCallScore);
+      const avgScore  = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 0;
       return {
         total:       calls.length,
         answered,
@@ -106,9 +113,27 @@ router.get('/analytics/summary', async (req, res) => {
       };
     }
 
+    // Build daily buckets for the last 7 days (Mon–Sun labels)
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dailyMap = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(todayStart); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      dailyMap[key] = { label: DAYS[d.getDay()], calls: 0, booked: 0 };
+    }
+    weekCalls.forEach(c => {
+      const key = c.loggedAt.toISOString().slice(0, 10);
+      if (dailyMap[key]) {
+        dailyMap[key].calls++;
+        if (isBooked(c)) dailyMap[key].booked++;
+      }
+    });
+    const weekly = Object.values(dailyMap);
+
     res.json({
       today:     summarise(todayCalls),
       yesterday: summarise(yesterdayCalls),
+      weekly,
       allTime:   { total: allTimeTotal },
     });
   } catch (err) {
