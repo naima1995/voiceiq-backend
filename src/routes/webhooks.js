@@ -202,7 +202,6 @@ router.post('/twilio/speech', async (req, res) => {
       if (silenceCount >= 1) {
         // Second consecutive silence — no one home, end the call cleanly
         logger.info('No speech after 2 attempts — ending call', { voiceiqCallId });
-        gemini.endSession(voiceiqCallId);
         return res.type('text/xml').send(twiml(`<Hangup/>`));
       }
       // First silence — give one more chance
@@ -219,7 +218,6 @@ router.post('/twilio/speech', async (req, res) => {
       logger.info('AI screener or voicemail detected — ending call silently', {
         voiceiqCallId, speech: SpeechResult,
       });
-      gemini.endSession(voiceiqCallId);
       return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
@@ -229,7 +227,6 @@ router.post('/twilio/speech', async (req, res) => {
         voiceiqCallId, speech: SpeechResult,
       });
       emit.prospectSpeaking({ callId: voiceiqCallId, speech: SpeechResult });
-      gemini.endSession(voiceiqCallId);
       return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
@@ -399,7 +396,6 @@ router.post('/twilio/speech', async (req, res) => {
     // Gemini detected a screener/voicemail mid-call — hang up silently
     if (aiResponse.hangUpNow) {
       logger.info('Gemini flagged hangUpNow — ending call silently', { voiceiqCallId });
-      gemini.endSession(voiceiqCallId);
       return res.type('text/xml').send(twiml(`<Hangup/>`));
     }
 
@@ -442,11 +438,12 @@ router.post('/twilio/status', async (req, res) => {
     const duration = parseInt(CallDuration || 0);
     let summary = null;
     let bookingResult = null;
-    try {
-      // Grab booking result before session is destroyed
-      const session = gemini.getSession(CallSid);
-      bookingResult = session?.bookingResult || null;
+    // Read everything from the session BEFORE generating summary or ending it
+    const session  = gemini.getSession(CallSid);
+    const agentId  = session?.agentConfig?.name?.toLowerCase() || null;
+    bookingResult  = session?.bookingResult || null;
 
+    try {
       summary = await gemini.generateCallSummary({ callId: CallSid, duration });
 
       // Append AI summary to the calendar event created during the call
@@ -463,16 +460,11 @@ router.post('/twilio/status', async (req, res) => {
           logger.warn('Failed to update calendar task with summary', { error: err.message })
         );
       }
-
-      gemini.endSession(CallSid);
     } catch (err) {
       logger.warn('Call summary failed', { error: err.message });
+    } finally {
       gemini.endSession(CallSid);
     }
-
-    // Recover agentId from the Gemini session before it's destroyed
-    const session = gemini.getSession(CallSid);
-    const agentId = session?.agentConfig?.name?.toLowerCase() || null;
 
     logCall({
       callId:    CallSid,

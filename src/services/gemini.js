@@ -362,6 +362,7 @@ Return this JSON:
       callId,
       agentName:       session.agentConfig.name,
       leadName:        session.leadData?.name,
+      leadFname:       session.leadData?.fname || session.leadData?.firstName || null,
       leadCompany:     session.leadData?.company,
       duration,
       turnCount:       session.turnCount,
