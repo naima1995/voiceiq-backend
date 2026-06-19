@@ -464,8 +464,13 @@ router.post('/twilio/status', async (req, res) => {
       gemini.endSession(CallSid);
     }
 
+    // Recover agentId from the Gemini session before it's destroyed
+    const session = gemini.getSession(CallSid);
+    const agentId = session?.agentConfig?.name?.toLowerCase() || null;
+
     logCall({
       callId:    CallSid,
+      agentId,
       direction: 'outbound',
       channel:   'twilio',
       toNumber:  To,
