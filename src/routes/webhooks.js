@@ -9,6 +9,7 @@ const { getKnowledgeForAgent } = require('./knowledge');
 const { buildTaskContext, getAgent } = require('./agents');
 const logger = require('../utils/logger');
 const audioCache = require('../utils/audioCache');
+const { appendTranscript } = require('../utils/transcript');
 
 // ─── Helper: wrap content in TwiML root element ───────────────────────────
 function twiml(inner) {
@@ -87,6 +88,7 @@ router.post('/twilio/answer', async (req, res) => {
     const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
     const answerUrl = `${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
 
+    appendTranscript(voiceiqCallId, [{ role: 'agent', text: aiResponse.speech }]);
     emit.callStarted({ callId: voiceiqCallId, twilioCallSid: CallSid, fromNumber: From, toNumber: To, agentId });
     logger.info('Twilio call answered', { voiceiqCallId, speech: aiResponse.speech });
 
@@ -241,6 +243,10 @@ router.post('/twilio/speech', async (req, res) => {
     });
     const audioUrl = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
 
+    appendTranscript(voiceiqCallId, [
+      { role: 'user',  text: SpeechResult },
+      { role: 'agent', text: aiResponse.speech },
+    ]);
     emit.agentSpeaking({ callId: voiceiqCallId, speech: aiResponse.speech, intent: aiResponse.intent });
 
     // ── Create calendar task when AI confirms booking ─────────────────────

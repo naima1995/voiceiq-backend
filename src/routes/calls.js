@@ -3,6 +3,7 @@ const router  = express.Router();
 const gemini  = require('../services/gemini');
 const prisma  = require('../utils/prisma');
 const { updateAgentStats } = require('./agents');
+const { getTranscript } = require('../utils/transcript');
 const logger  = require('../utils/logger');
 
 // ─── Log a call (internal — called by webhook handlers) ──────────────────────
@@ -139,6 +140,20 @@ router.get('/analytics/summary', async (req, res) => {
   } catch (err) {
     logger.error('Failed to fetch analytics', { error: err.message });
     res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
+// ─── GET /api/calls/:callId/transcript ───────────────────────────────────────
+router.get('/:callId/transcript', async (req, res) => {
+  try {
+    const ref      = req.params.callId;
+    // Resolve the internal callId (Twilio SID or UUID both accepted)
+    const call     = await prisma.call.findFirst({ where: { OR: [{ callId: ref }, { id: ref }] } });
+    const resolvedId = call?.callId || ref;
+    const messages = await getTranscript(resolvedId);
+    res.json({ callId: resolvedId, messages, count: messages.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch transcript' });
   }
 });
 

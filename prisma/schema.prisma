@@ -97,6 +97,17 @@ model Call {
   lead     Lead?     @relation(fields: [leadId], references: [id])
 }
 
+model TranscriptMessage {
+  id     Int      @id @default(autoincrement())
+  callId String
+  role   String   // 'user' | 'agent'
+  text   String   @db.Text
+  ts     DateTime @default(now())
+
+  @@index([callId])
+  @@index([ts])
+}
+
 model KnowledgeBase {
   id          Int      @id @default(autoincrement())
   name        String
