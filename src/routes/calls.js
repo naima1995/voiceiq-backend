@@ -143,9 +143,13 @@ router.get('/analytics/summary', async (req, res) => {
 });
 
 // ─── GET /api/calls/:callId ───────────────────────────────────────────────────
+// Accepts either the Twilio callId (CA...) or the internal UUID id
 router.get('/:callId', async (req, res) => {
   try {
-    const call = await prisma.call.findUnique({ where: { callId: req.params.callId } });
+    const ref  = req.params.callId;
+    const call = await prisma.call.findFirst({
+      where: { OR: [{ callId: ref }, { id: ref }] },
+    });
     if (!call) return res.status(404).json({ error: 'Call not found' });
     res.json({ ...call, summary: call.summary ? JSON.parse(call.summary) : null });
   } catch (err) {
