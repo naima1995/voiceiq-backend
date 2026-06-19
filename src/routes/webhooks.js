@@ -27,7 +27,10 @@ router.post('/twilio/answer', async (req, res) => {
     leadProvider = '',
   } = req.query;
   const { CallSid, From, To } = req.body;
-  const voiceiqCallId = callId || CallSid;
+  // Always use Twilio's CallSid as the session key — the UUID from twilio.js
+  // is never stored in DB and the status callback only has CallSid, so using
+  // the UUID caused getSession/transcript lookups to silently return null.
+  const voiceiqCallId = CallSid;
   const base = process.env.CALLBACK_BASE_URL;
 
   try {
@@ -85,8 +88,8 @@ router.post('/twilio/answer', async (req, res) => {
       agentSettings: agentConfig.settings || null,
     });
     const audioUrl  = `${base}/api/voice/audio/${audioCache.store(audioBuffer)}`;
-    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
-    const answerUrl = `${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+    const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}`;
+    const answerUrl = `${base}/api/webhooks/twilio/answer?agentId=${encodeURIComponent(agentId)}`;
 
     appendTranscript(voiceiqCallId, [{ role: 'agent', text: aiResponse.speech }]);
     emit.callStarted({ callId: voiceiqCallId, twilioCallSid: CallSid, fromNumber: From, toNumber: To, agentId });
@@ -100,7 +103,7 @@ router.post('/twilio/answer', async (req, res) => {
     `));
   } catch (err) {
     logger.error('Twilio answer webhook error', { error: err.message });
-    const fallbackSpeechUrl = `${process.env.CALLBACK_BASE_URL}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(callId || '')}`;
+    const fallbackSpeechUrl = `${process.env.CALLBACK_BASE_URL}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}`;
     res.type('text/xml').send(twiml(`
       <Gather input="speech" action="${fallbackSpeechUrl}" method="POST" speechTimeout="auto" language="en-GB" timeout="15">
         <Say language="en-GB">One moment please.</Say>
@@ -189,11 +192,11 @@ function isProspectFarewell(speech) {
 
 // ─── Twilio: speech received — AI processes and responds ─────────────────
 router.post('/twilio/speech', async (req, res) => {
-  const { agentId = 'rachel', callId, silence = '0' } = req.query;
+  const { agentId = 'rachel', silence = '0' } = req.query;
   const { SpeechResult, CallSid } = req.body;
-  const voiceiqCallId = callId || CallSid;
+  const voiceiqCallId = CallSid;
   const base = process.env.CALLBACK_BASE_URL;
-  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}&amp;callId=${encodeURIComponent(voiceiqCallId)}`;
+  const speechUrl = `${base}/api/webhooks/twilio/speech?agentId=${encodeURIComponent(agentId)}`;
   const agentConfig = getAgent(agentId) || {};
 
   try {

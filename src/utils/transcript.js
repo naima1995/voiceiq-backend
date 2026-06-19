@@ -24,7 +24,7 @@ async function getTranscript(callId) {
 
 // Delete transcript messages older than 24 hours — call periodically
 async function purgeOldTranscripts() {
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
   try {
     const { count } = await prisma.transcriptMessage.deleteMany({
       where: { ts: { lt: cutoff } },
