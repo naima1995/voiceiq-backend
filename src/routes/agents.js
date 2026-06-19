@@ -213,30 +213,40 @@ async function persistAgent(agent) {
 }
 
 // ─── Seed in-memory agents from DB on startup ─────────────────────────────
-// Runs once. For each agent in the DB, overwrites the in-memory defaults with
-// the last-saved settings so config survives Railway restarts.
+// 1. Upsert all hardcoded defaults to DB (so they persist from day one).
+// 2. Restore any DB-saved settings on top of the defaults.
+// 3. Load any custom agents created via POST that aren't in the hardcoded Map.
 async function seedAgentsFromDB() {
   try {
+    // Write defaults to DB if they don't exist yet
+    for (const agent of agents.values()) {
+      await persistAgent(agent);
+    }
+
     const rows = await prisma.agent.findMany();
     rows.forEach(row => {
       const existing = agents.get(row.id);
-      if (!existing) return; // don't create agents that no longer exist in code
+      const base = existing || {
+        stats: { callsToday: 0, bookings: 0, answerRate: 0, avgScore: 0, _scores: [], _answered: 0 },
+        createdAt: row.createdAt?.toISOString() || new Date().toISOString(),
+      };
       agents.set(row.id, {
-        ...existing,
+        ...base,
+        id:          row.id,
         name:        row.name,
-        accent:      row.accent      || existing.accent,
-        gender:      row.gender      || existing.gender,
-        status:      row.status      || existing.status,
-        voiceId:     row.voiceId     || existing.voiceId,
-        companyName: row.companyName || existing.companyName,
-        script:      row.script      || existing.script,
-        faqContext:  row.faqContext  || existing.faqContext,
+        accent:      row.accent      || base.accent      || 'Neutral UK Business',
+        gender:      row.gender      || base.gender      || 'Female',
+        status:      row.status      || base.status      || 'active',
+        voiceId:     row.voiceId     || base.voiceId     || null,
+        companyName: row.companyName || base.companyName || 'VoiceIQ',
+        script:      row.script      || base.script      || DEFAULT_PROTECTION_SCRIPT,
+        faqContext:  row.faqContext  || base.faqContext  || null,
         settings: {
-          creativity:        row.creativity,
-          patience:          row.patience,
-          stability:         row.stability,
-          voiceSpeed:        row.voiceSpeed,
-          conversationStyle: row.conversationStyle,
+          creativity:        row.creativity        ?? 75,
+          patience:          row.patience          ?? 70,
+          stability:         row.stability         ?? 60,
+          voiceSpeed:        row.voiceSpeed        ?? 80,
+          conversationStyle: row.conversationStyle || 'formal',
         },
       });
     });
@@ -326,10 +336,13 @@ router.patch('/:id', (req, res) => {
 });
 
 // ─── Delete agent ─────────────────────────────────────────────────────────
-router.delete('/:id', (req, res) => {
-  if (!agents.has(req.params.id)) return res.status(404).json({ error: 'Agent not found' });
-  agents.delete(req.params.id);
-  res.json({ deleted: true, id: req.params.id });
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!agents.has(id)) return res.status(404).json({ error: 'Agent not found' });
+  if (agents.size <= 1) return res.status(400).json({ error: 'Cannot delete the last agent' });
+  agents.delete(id);
+  try { await prisma.agent.delete({ where: { id } }); } catch (_) { /* already gone */ }
+  res.json({ deleted: true, id });
 });
 
 // ─── Agent Tasks store (synced from frontend via POST) ────────────────────
