@@ -218,10 +218,28 @@ async function persistAgent(agent) {
 // 3. Load any custom agents created via POST that aren't in the hardcoded Map.
 async function seedAgentsFromDB() {
   try {
-    // Write defaults to DB if they don't exist yet
-    for (const agent of agents.values()) {
-      await persistAgent(agent);
-    }
+    // Insert hardcoded defaults only if they don't already exist — never overwrite
+    // existing DB data (which may contain user-edited prompts from Prompt Builder)
+    const s = (a) => a.settings || {};
+    await prisma.agent.createMany({
+      skipDuplicates: true,
+      data: [...agents.values()].map(a => ({
+        id:                a.id,
+        name:              a.name,
+        accent:            a.accent            || null,
+        gender:            a.gender            || null,
+        status:            a.status            || 'active',
+        voiceId:           a.voiceId           || null,
+        companyName:       a.companyName       || null,
+        script:            a.script            || null,
+        faqContext:        a.faqContext        || null,
+        creativity:        s(a).creativity     ?? 75,
+        patience:          s(a).patience       ?? 70,
+        stability:         s(a).stability      ?? 60,
+        voiceSpeed:        s(a).voiceSpeed     ?? 80,
+        conversationStyle: s(a).conversationStyle || 'formal',
+      })),
+    });
 
     const rows = await prisma.agent.findMany();
     rows.forEach(row => {
@@ -282,6 +300,11 @@ function publicAgent(a) {
   const { _scores, _answered, ...pub } = a.stats;
   return { ...a, stats: pub };
 }
+
+// ─── Return the hardcoded default script ─────────────────────────────────
+router.get('/default-script', (req, res) => {
+  res.json({ script: DEFAULT_PROTECTION_SCRIPT });
+});
 
 // ─── List all agents — enrich with live DB stats ──────────────────────────
 router.get('/', async (req, res) => {
