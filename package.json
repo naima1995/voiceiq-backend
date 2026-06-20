@@ -4,7 +4,7 @@
   "description": "VoiceIQ AI Calling Platform — Backend API",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "npx prisma migrate deploy && node src/index.js",
     "build": "npx prisma generate",
     "dev": "nodemon src/index.js",
     "test": "jest --runInBand"
