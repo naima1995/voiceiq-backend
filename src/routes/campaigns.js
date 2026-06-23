@@ -120,6 +120,24 @@ router.post('/:id/pause', (req, res) => {
   res.json({ message: 'Campaign paused', campaign });
 });
 
+// ─── GET /api/campaigns/:id/leads — show leads for a campaign ─────────────
+router.get('/:id/leads', (req, res) => {
+  const { leadsStore } = require('./leads');
+  const campaign = campaigns.find(c => c.id === req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+  const leads = leadsStore.filter(
+    l => l.campaignId === req.params.id || (!l.campaignId && l.status === 'pending')
+  );
+
+  const byStatus = leads.reduce((acc, l) => {
+    acc[l.status] = (acc[l.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  res.json({ total: leads.length, byStatus, leads: leads.slice(0, 20) });
+});
+
 // ─── Dialler helpers ──────────────────────────────────────────────────────
 
 function stopDialler(campaignId) {
@@ -131,7 +149,6 @@ function stopDialler(campaignId) {
 }
 
 async function runDialler(campaign) {
-  // Lazy-require to avoid circular dep at module load time
   const { leadsStore } = require('./leads');
 
   const DELAY_BETWEEN_CALLS = 8000; // 8 s gap between dials
@@ -139,33 +156,34 @@ async function runDialler(campaign) {
   diallerState[campaign.id] = { running: true, timer: null };
   const state = diallerState[campaign.id];
 
-  // Get leads for this campaign that haven't been called yet
   const getNextLead = () =>
     leadsStore.find(l => l.campaignId === campaign.id && l.status === 'pending')
-    // Fallback: if no campaignId on leads (uploaded before this change), try unclaimed pending leads
     || leadsStore.find(l => !l.campaignId && l.status === 'pending');
 
   const dialNext = async () => {
-    // Stop if paused/deleted
     if (!state.running) return;
     const freshCampaign = campaigns.find(c => c.id === campaign.id);
     if (!freshCampaign || freshCampaign.status !== 'active') return;
 
     const lead = getNextLead();
     if (!lead) {
-      // No more leads — mark campaign complete
       if (freshCampaign) {
         freshCampaign.status    = 'completed';
         freshCampaign.updatedAt = new Date().toISOString();
       }
       state.running = false;
-      logger.info('Campaign completed — no more leads', { id: campaign.id });
-      broadcast('campaign_completed', { campaignId: campaign.id });
+      const reached = freshCampaign?.reached || 0;
+      logger.info('Campaign completed — no more leads', { id: campaign.id, reached });
+      broadcast('campaign_completed', { campaignId: campaign.id, reached });
       return;
     }
 
-    // Mark lead as in-progress immediately to avoid double-dial
     lead.status = 'calling';
+    broadcast('campaign_dial_attempt', {
+      campaignId: campaign.id,
+      phone: lead.phone,
+      name: lead.name || `${lead.firstName || ''} ${lead.lastName || ''}`.trim(),
+    });
 
     try {
       await twilio.makeOutboundCall({
@@ -184,7 +202,7 @@ async function runDialler(campaign) {
           email:     lead.email,
         },
       });
-      lead.status  = 'called';
+      lead.status   = 'called';
       lead.calledAt = new Date().toISOString();
       freshCampaign.reached = (freshCampaign.reached || 0) + 1;
       logger.info('Campaign dialler: call placed', { campaignId: campaign.id, phone: lead.phone });
@@ -192,15 +210,18 @@ async function runDialler(campaign) {
       lead.status = 'error';
       lead.error  = err.message;
       logger.warn('Campaign dialler: call failed', { phone: lead.phone, error: err.message });
+      broadcast('campaign_dial_failed', {
+        campaignId: campaign.id,
+        phone: lead.phone,
+        error: err.message,
+      });
     }
 
-    // Schedule next call
     if (state.running) {
       state.timer = setTimeout(dialNext, DELAY_BETWEEN_CALLS);
     }
   };
 
-  // Start immediately
   dialNext();
 }
 

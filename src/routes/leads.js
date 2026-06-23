@@ -127,6 +127,38 @@ router.post('/upload', upload.single('file'), (req, res) => {
   }
 });
 
+// ─── POST /api/leads — add a single lead manually ────────────────────────
+router.post('/', (req, res) => {
+  const { phone, name, fname, lname, provider, campaignId } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+
+  const validation = validatePhone(phone);
+  if (!validation.valid) return res.status(400).json({ error: validation.reason });
+
+  const lead = {
+    id:         require('crypto').randomUUID(),
+    name:       name || [fname, lname].filter(Boolean).join(' ') || '',
+    firstName:  fname || '',
+    lastName:   lname || '',
+    phone:      validation.number,
+    address:    '',
+    town:       '',
+    country:    '',
+    postcode:   '',
+    age:        '',
+    life:       '',
+    provider:   provider || '',
+    email:      '',
+    campaignId: campaignId || null,
+    status:     'pending',
+    importedAt: new Date().toISOString(),
+  };
+
+  leadsStore.push(lead);
+  logger.info('Single lead added', { phone: lead.phone, campaignId });
+  res.status(201).json({ success: true, lead });
+});
+
 // ─── GET /api/leads — return stored leads ─────────────────────────────────
 router.get('/', (req, res) => {
   const { page = 1, limit = 100 } = req.query;
