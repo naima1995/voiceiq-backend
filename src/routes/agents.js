@@ -400,10 +400,18 @@ router.post('/', (req, res) => {
   res.status(201).json(agent);
 });
 
-// ─── Update agent ─────────────────────────────────────────────────────────
-router.patch('/:id', (req, res) => {
+// ─── Update agent — snapshot script before overwriting ────────────────────
+router.patch('/:id', async (req, res) => {
   const agent = agents.get(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+  // If script is changing, save a version snapshot of the CURRENT script first
+  if (req.body.script !== undefined && req.body.script !== agent.script && agent.script) {
+    const label = req.body.versionLabel || null;
+    prisma.agentScriptVersion.create({
+      data: { agentId: req.params.id, script: agent.script, label },
+    }).catch(err => logger.warn('Failed to snapshot agent script version', { error: err.message }));
+  }
 
   const allowed = ['name', 'accent', 'gender', 'status', 'companyName', 'script', 'faqContext', 'voiceId', 'settings'];
   allowed.forEach(field => {
@@ -414,6 +422,52 @@ router.patch('/:id', (req, res) => {
   agents.set(req.params.id, agent);
   persistAgent(agent);
   res.json(agent);
+});
+
+// ─── GET /api/agents/:id/versions — list script version history ───────────
+router.get('/:id/versions', async (req, res) => {
+  try {
+    const versions = await prisma.agentScriptVersion.findMany({
+      where:   { agentId: req.params.id },
+      orderBy: { savedAt: 'desc' },
+      select:  { id: true, label: true, savedAt: true, script: true },
+      take:    20,
+    });
+    res.json({ versions });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch versions' });
+  }
+});
+
+// ─── POST /api/agents/:id/versions/:versionId/restore ────────────────────
+router.post('/:id/versions/:versionId/restore', async (req, res) => {
+  const agent = agents.get(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+  try {
+    const version = await prisma.agentScriptVersion.findUnique({
+      where: { id: parseInt(req.params.versionId) },
+    });
+    if (!version || version.agentId !== req.params.id) {
+      return res.status(404).json({ error: 'Version not found' });
+    }
+
+    // Snapshot the current script before restoring
+    if (agent.script) {
+      await prisma.agentScriptVersion.create({
+        data: { agentId: req.params.id, script: agent.script, label: 'Before restore' },
+      });
+    }
+
+    agent.script    = version.script;
+    agent.updatedAt = new Date().toISOString();
+    agents.set(req.params.id, agent);
+    await persistAgent(agent);
+
+    res.json({ restored: true, script: version.script });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to restore version' });
+  }
 });
 
 // ─── Delete agent ─────────────────────────────────────────────────────────

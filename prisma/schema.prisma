@@ -108,6 +108,17 @@ model TranscriptMessage {
   @@index([ts])
 }
 
+model AgentScriptVersion {
+  id      Int      @id @default(autoincrement())
+  agentId String
+  script  String   @db.Text
+  label   String?  // optional user-supplied label, e.g. "Before adding objection handling"
+  savedAt DateTime @default(now())
+
+  @@index([agentId])
+  @@index([savedAt])
+}
+
 model KnowledgeBase {
   id          Int      @id @default(autoincrement())
   name        String
