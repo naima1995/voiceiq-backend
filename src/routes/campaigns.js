@@ -9,6 +9,19 @@ const { broadcast } = require('../services/websocket');
 // Maps campaignId → { running: bool, timer: Timeout | null }
 const diallerState = {};
 
+// Maps twilioCallSid → lead object so the status callback can update lead status
+const callSidToLead = {};
+
+// Called by the status callback in webhooks.js when a call ends
+function updateLeadOutcome(twilioCallSid, outcome) {
+  const lead = callSidToLead[twilioCallSid];
+  if (lead) {
+    lead.status    = outcome; // 'called', 'voicemail', 'no_answer', 'busy', 'error'
+    lead.calledAt  = lead.calledAt || new Date().toISOString();
+    delete callSidToLead[twilioCallSid];
+  }
+}
+
 // ─── In-memory campaigns store ────────────────────────────────────────────
 const campaigns = [];
 
@@ -156,9 +169,10 @@ async function runDialler(campaign) {
   diallerState[campaign.id] = { running: true, timer: null };
   const state = diallerState[campaign.id];
 
+  // Only dial leads explicitly assigned to this campaign — no unclaimed fallback.
+  // The fallback caused multiple campaigns to call the same number simultaneously.
   const getNextLead = () =>
-    leadsStore.find(l => l.campaignId === campaign.id && l.status === 'pending')
-    || leadsStore.find(l => !l.campaignId && l.status === 'pending');
+    leadsStore.find(l => l.campaignId === campaign.id && l.status === 'pending');
 
   const dialNext = async () => {
     if (!state.running) return;
@@ -186,7 +200,7 @@ async function runDialler(campaign) {
     });
 
     try {
-      await twilio.makeOutboundCall({
+      const result = await twilio.makeOutboundCall({
         toNumber:   lead.phone,
         agentId:    campaign.agentId || 'rachel',
         leadData: {
@@ -202,10 +216,12 @@ async function runDialler(campaign) {
           email:     lead.email,
         },
       });
+      // Track CallSid → lead so status callback can update outcome
+      if (result?.twilioCallSid) callSidToLead[result.twilioCallSid] = lead;
       lead.status   = 'called';
       lead.calledAt = new Date().toISOString();
       freshCampaign.reached = (freshCampaign.reached || 0) + 1;
-      logger.info('Campaign dialler: call placed', { campaignId: campaign.id, phone: lead.phone });
+      logger.info('Campaign dialler: call placed', { campaignId: campaign.id, phone: lead.phone, sid: result?.twilioCallSid });
     } catch (err) {
       lead.status = 'error';
       lead.error  = err.message;
@@ -226,3 +242,4 @@ async function runDialler(campaign) {
 }
 
 module.exports = router;
+module.exports.updateLeadOutcome = updateLeadOutcome;

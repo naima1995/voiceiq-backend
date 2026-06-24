@@ -7,6 +7,7 @@ const { emit } = require('../services/websocket');
 const { logCall } = require('./calls');
 const { getKnowledgeForAgent } = require('./knowledge');
 const { buildTaskContext, getAgent } = require('./agents');
+const { updateLeadOutcome } = require('./campaigns');
 const logger = require('../utils/logger');
 const audioCache = require('../utils/audioCache');
 const { appendTranscript } = require('../utils/transcript');
@@ -113,6 +114,10 @@ router.post('/twilio/answer', async (req, res) => {
   }
 });
 
+// Tracks CallSids where AMD detected voicemail/machine so status callback
+// can record the correct outcome instead of the generic 'completed'.
+const amdVoicemailSids = new Set();
+
 // ─── Twilio: AMD (Answering Machine Detection) callback ──────────────────
 // Fired async by Twilio when machineDetection result is ready.
 // If it's a machine/voicemail, end the call via REST immediately.
@@ -126,6 +131,7 @@ router.post('/twilio/amd', async (req, res) => {
 
   if (isMachine || isFax) {
     logger.info('AMD: machine/voicemail detected — ending call', { CallSid, AnsweredBy });
+    amdVoicemailSids.add(CallSid);
     try {
       const twilio = require('twilio');
       const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -441,31 +447,49 @@ router.post('/twilio/status', async (req, res) => {
     const duration = parseInt(CallDuration || 0);
     let summary = null;
     let bookingResult = null;
+
+    // Resolve the true outcome — AMD voicemails arrive as 'completed' but should be 'voicemail'
+    const isVoicemail = amdVoicemailSids.has(CallSid);
+    if (isVoicemail) amdVoicemailSids.delete(CallSid);
+
+    const resolvedOutcome = isVoicemail          ? 'voicemail'
+      : CallStatus === 'no-answer'               ? 'no_answer'
+      : CallStatus === 'busy'                    ? 'busy'
+      : CallStatus === 'failed'                  ? 'failed'
+      : null; // let AI summary decide for real completed calls
+
+    // Update the lead in the dialler so it isn't redialled
+    updateLeadOutcome(CallSid, resolvedOutcome || 'called');
+
     // Read everything from the session BEFORE generating summary or ending it
     const session  = gemini.getSession(CallSid);
     const agentId  = session?.agentConfig?.name?.toLowerCase() || null;
     bookingResult  = session?.bookingResult || null;
 
-    try {
-      summary = await gemini.generateCallSummary({ callId: CallSid, duration });
+    // Skip AI summary for calls that never connected (voicemail, no-answer, busy)
+    if (!resolvedOutcome) {
+      try {
+        summary = await gemini.generateCallSummary({ callId: CallSid, duration });
 
-      // Append AI summary to the calendar event created during the call
-      if (summary && bookingResult?.taskId) {
-        const summaryLines = [
-          summary.summary     ? summary.summary                        : null,
-          summary.outcome     ? `\nOutcome:     ${summary.outcome}`    : null,
-          summary.keyPoints?.length ? `\nKey Points:\n${summary.keyPoints.map(p => `  • ${p}`).join('\n')}` : null,
-          summary.objections?.length ? `\nObjections:\n${summary.objections.map(o => `  • ${o}`).join('\n')}` : null,
-          summary.nextAction  ? `\nNext Action: ${summary.nextAction}` : null,
-        ].filter(Boolean).join('\n');
+        if (summary && bookingResult?.taskId) {
+          const summaryLines = [
+            summary.summary     ? summary.summary                        : null,
+            summary.outcome     ? `\nOutcome:     ${summary.outcome}`    : null,
+            summary.keyPoints?.length ? `\nKey Points:\n${summary.keyPoints.map(p => `  • ${p}`).join('\n')}` : null,
+            summary.objections?.length ? `\nObjections:\n${summary.objections.map(o => `  • ${o}`).join('\n')}` : null,
+            summary.nextAction  ? `\nNext Action: ${summary.nextAction}` : null,
+          ].filter(Boolean).join('\n');
 
-        calendar.updateTaskNotes(bookingResult.taskId, summaryLines).catch(err =>
-          logger.warn('Failed to update calendar task with summary', { error: err.message })
-        );
+          calendar.updateTaskNotes(bookingResult.taskId, summaryLines).catch(err =>
+            logger.warn('Failed to update calendar task with summary', { error: err.message })
+          );
+        }
+      } catch (err) {
+        logger.warn('Call summary failed', { error: err.message });
+      } finally {
+        gemini.endSession(CallSid);
       }
-    } catch (err) {
-      logger.warn('Call summary failed', { error: err.message });
-    } finally {
+    } else {
       gemini.endSession(CallSid);
     }
 
@@ -479,7 +503,7 @@ router.post('/twilio/status', async (req, res) => {
       duration,
       endedAt:   new Date().toISOString(),
       summary,
-      outcome:   summary?.outcome || CallStatus,
+      outcome:   resolvedOutcome || summary?.outcome || 'completed',
       ...(bookingResult && {
         booking: {
           taskId:   bookingResult.taskId   || null,
@@ -490,7 +514,7 @@ router.post('/twilio/status', async (req, res) => {
       }),
     });
 
-    emit.callEnded({ callId: CallSid, duration, status: CallStatus, channel: 'twilio' });
+    emit.callEnded({ callId: CallSid, duration, status: CallStatus, outcome: resolvedOutcome || CallStatus, channel: 'twilio' });
     if (summary) emit.callSummary({ callId: CallSid, summary });
   }
 });
