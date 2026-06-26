@@ -55,20 +55,22 @@ router.post('/', (req, res) => {
     sun: { enabled: false, from: '10:00', to: '14:00' },
   };
 
+  const { scheduledAt } = req.body;
   const campaign = {
-    id:         uuidv4(),
+    id:          uuidv4(),
     name,
-    agentId:    agentId   || 'james',
-    script:     script    || '',
-    dailyLimit: parseInt(dailyLimit) || 200,
-    startDate:  startDate || new Date().toISOString().split('T')[0],
-    timezone:   timezone  || 'Europe/London',
-    schedule:   schedule  || defaultSchedule,
-    status:     'draft',
-    leadCount:  0,
-    reached:    0,
-    booked:     0,
-    createdAt:  new Date().toISOString(),
+    agentId:     agentId   || 'james',
+    script:      script    || '',
+    dailyLimit:  parseInt(dailyLimit) || 200,
+    startDate:   startDate || new Date().toISOString().split('T')[0],
+    timezone:    timezone  || 'Europe/London',
+    schedule:    schedule  || defaultSchedule,
+    scheduledAt: scheduledAt || null,
+    status:      scheduledAt ? 'scheduled' : 'draft',
+    leadCount:   0,
+    reached:     0,
+    booked:      0,
+    createdAt:   new Date().toISOString(),
   };
 
   campaigns.unshift(campaign);
@@ -151,6 +153,46 @@ router.get('/:id/leads', (req, res) => {
   res.json({ total: leads.length, byStatus, leads: leads.slice(0, 20) });
 });
 
+// ─── Schedule helpers ─────────────────────────────────────────────────────
+
+// Returns true if the current clock time falls within the campaign's
+// per-day calling schedule (evaluated in the campaign's own timezone).
+function isWithinSchedule(campaign) {
+  const tz   = campaign.timezone || 'Europe/London';
+  const now  = new Date();
+
+  // Short weekday name in campaign timezone: 'Mon' → 'mon'
+  const dayKey = now.toLocaleDateString('en-GB', { weekday: 'short', timeZone: tz })
+    .toLowerCase(); // 'mon' | 'tue' | ...
+
+  const sched = campaign.schedule?.[dayKey];
+  if (!sched?.enabled) return false;
+
+  // Current HH:MM in campaign timezone
+  const hhmm = now.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz,
+  }); // e.g. '09:30'
+
+  return hhmm >= sched.from && hhmm <= sched.to;
+}
+
+// ─── Auto-start scheduler — checks every 60 s for due campaigns ───────────
+setInterval(() => {
+  const now = new Date();
+  campaigns.forEach(campaign => {
+    if (campaign.status === 'scheduled' && campaign.scheduledAt) {
+      if (new Date(campaign.scheduledAt) <= now) {
+        logger.info('Auto-starting scheduled campaign', { id: campaign.id, name: campaign.name });
+        campaign.status    = 'active';
+        campaign.startedAt = now.toISOString();
+        campaign.updatedAt = now.toISOString();
+        broadcast('campaign_started', { campaignId: campaign.id, name: campaign.name });
+        runDialler(campaign);
+      }
+    }
+  });
+}, 60 * 1000);
+
 // ─── Dialler helpers ──────────────────────────────────────────────────────
 
 function stopDialler(campaignId) {
@@ -178,6 +220,14 @@ async function runDialler(campaign) {
     if (!state.running) return;
     const freshCampaign = campaigns.find(c => c.id === campaign.id);
     if (!freshCampaign || freshCampaign.status !== 'active') return;
+
+    // Respect per-day calling hours — if outside schedule, wait 5 min and retry
+    if (!isWithinSchedule(freshCampaign)) {
+      logger.info('Campaign outside calling hours — waiting', { id: campaign.id });
+      broadcast('campaign_waiting', { campaignId: campaign.id, reason: 'outside_hours' });
+      state.timer = setTimeout(dialNext, 5 * 60 * 1000);
+      return;
+    }
 
     const lead = getNextLead();
     if (!lead) {
