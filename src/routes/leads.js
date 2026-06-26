@@ -13,7 +13,8 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const allowed = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-      'application/vnd.ms-excel', // .xls
+      'application/vnd.ms-excel',  // .xls
+      'application/octet-stream',  // macOS Safari sends this for .xlsx files
     ];
     if (allowed.includes(file.mimetype) || file.originalname.match(/\.(xlsx|xls)$/i)) {
       cb(null, true);
@@ -38,11 +39,22 @@ router.post('/upload', upload.single('file'), (req, res) => {
 
     if (!rows.length) return res.status(400).json({ error: 'Excel sheet is empty' });
 
+    // Debug: log raw column names and first row phone value
+    if (rows[0]) {
+      const firstRowKeys = Object.keys(rows[0]);
+      const phoneKey = firstRowKeys.find(k => k.toLowerCase().replace(/\s+/g, '_').includes('phone'));
+      logger.info('Excel column debug', {
+        columns: firstRowKeys,
+        phoneKey,
+        phoneValue: phoneKey ? rows[0][phoneKey] : '(no phone column found)',
+      });
+    }
+
     // Normalise column names to match the expected Excel format:
     // Title, Fname, Lname, Phone, Address (cols), Town, Country, Postcode, Age, Life, Provider
     const normalise = (row) => {
       const r = Object.fromEntries(
-        Object.entries(row).map(([k, v]) => [k.trim().toLowerCase().replace(/\s+/g, '_'), String(v).trim()])
+        Object.entries(row).map(([k, v]) => [k.replace(/^﻿/, '').trim().toLowerCase().replace(/\s+/g, '_'), String(v).trim()])
       );
 
       // Build full name from Title + Fname + Lname
@@ -82,8 +94,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
 
     rows.forEach((row, i) => {
       const lead = normalise(row);
-      const rawPhone = row.phone || row.Phone || row.PHONE ||
-                       row.phone_number || row.mobile || row.telephone || '';
+
+      // Use the already-normalised lead.phone so column name casing doesn't matter
+      const rawPhone = lead.phone || '';
 
       if (!rawPhone || !String(rawPhone).trim()) {
         skippedRows.push({ row: i + 2, reason: 'No phone number provided' });
@@ -118,8 +131,9 @@ router.post('/upload', upload.single('file'), (req, res) => {
       imported: validLeads.length,
       skipped:  skippedRows.length,
       total:    rows.length,
-      skippedDetails: skippedRows.slice(0, 20), // show up to 20 skipped
-      leads:    validLeads.slice(0, 5),          // preview first 5 valid
+      detectedColumns: rows[0] ? Object.keys(rows[0]) : [],
+      skippedDetails: skippedRows.slice(0, 20),
+      leads:    validLeads.slice(0, 5),
     });
   } catch (err) {
     logger.error('Excel parse error', { error: err.message });
