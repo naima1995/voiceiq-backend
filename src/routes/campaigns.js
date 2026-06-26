@@ -81,7 +81,7 @@ router.patch('/:id', (req, res) => {
   const campaign = campaigns.find(c => c.id === req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-  const allowed = ['name', 'agentId', 'status', 'leadCount', 'reached', 'booked', 'script', 'dailyLimit'];
+  const allowed = ['name', 'agentId', 'status', 'leadCount', 'reached', 'booked', 'script', 'dailyLimit', 'schedule', 'timezone', 'startDate', 'scheduledAt'];
   allowed.forEach(key => {
     if (req.body[key] !== undefined) campaign[key] = req.body[key];
   });
