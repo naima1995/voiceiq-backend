@@ -141,16 +141,21 @@ router.get('/:id/leads', (req, res) => {
   const campaign = campaigns.find(c => c.id === req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-  const leads = leadsStore.filter(
-    l => l.campaignId === req.params.id || (!l.campaignId && l.status === 'pending')
-  );
+  const leads = leadsStore.filter(l => l.campaignId === req.params.id);
+  const unclaimed = leadsStore.filter(l => !l.campaignId && l.status === 'pending');
 
   const byStatus = leads.reduce((acc, l) => {
     acc[l.status] = (acc[l.status] || 0) + 1;
     return acc;
   }, {});
 
-  res.json({ total: leads.length, byStatus, leads: leads.slice(0, 20) });
+  res.json({
+    total: leads.length,
+    byStatus,
+    unclaimedLeads: unclaimed.length,
+    leads: leads.slice(0, 20),
+    scheduleNow: isWithinSchedule(campaign),
+  });
 });
 
 // ─── Schedule helpers ─────────────────────────────────────────────────────
@@ -158,22 +163,37 @@ router.get('/:id/leads', (req, res) => {
 // Returns true if the current clock time falls within the campaign's
 // per-day calling schedule (evaluated in the campaign's own timezone).
 function isWithinSchedule(campaign) {
-  const tz   = campaign.timezone || 'Europe/London';
-  const now  = new Date();
+  const tz  = campaign.timezone || 'Europe/London';
+  const now = new Date();
 
-  // Short weekday name in campaign timezone: 'Mon' → 'mon'
-  const dayKey = now.toLocaleDateString('en-GB', { weekday: 'short', timeZone: tz })
-    .toLowerCase(); // 'mon' | 'tue' | ...
+  // Use Intl.DateTimeFormat for reliable short weekday in the campaign timezone.
+  // toLocaleDateString can return locale-specific formats; this always gives just the weekday part.
+  const dayKey = new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: tz })
+    .format(now)
+    .toLowerCase()
+    .replace(/[^a-z]/g, ''); // strip punctuation — some ICU builds append '.'
 
   const sched = campaign.schedule?.[dayKey];
-  if (!sched?.enabled) return false;
 
-  // Current HH:MM in campaign timezone
-  const hhmm = now.toLocaleTimeString('en-GB', {
+  // Current HH:MM in campaign timezone (24-hour, zero-padded)
+  const hhmm = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz,
-  }); // e.g. '09:30'
+  }).format(now).replace(/[^0-9:]/g, '');
 
-  return hhmm >= sched.from && hhmm <= sched.to;
+  const within = !!(sched?.enabled && hhmm >= sched.from && hhmm <= sched.to);
+
+  logger.info('isWithinSchedule', {
+    campaignId: campaign.id,
+    tz,
+    dayKey,
+    hhmm,
+    schedEnabled: sched?.enabled,
+    from: sched?.from,
+    to: sched?.to,
+    result: within,
+  });
+
+  return within;
 }
 
 // ─── Auto-start scheduler — checks every 60 s for due campaigns ───────────
@@ -210,6 +230,22 @@ async function runDialler(campaign) {
 
   diallerState[campaign.id] = { running: true, timer: null };
   const state = diallerState[campaign.id];
+
+  // Startup diagnostics — visible in Railway logs
+  const pendingLeads = leadsStore.filter(l => l.campaignId === campaign.id && l.status === 'pending');
+  const allCampaignLeads = leadsStore.filter(l => l.campaignId === campaign.id);
+  const unclaimed = leadsStore.filter(l => !l.campaignId && l.status === 'pending');
+  logger.info('Dialler starting', {
+    campaignId:    campaign.id,
+    name:          campaign.name,
+    agentId:       campaign.agentId,
+    pendingLeads:  pendingLeads.length,
+    totalLeads:    allCampaignLeads.length,
+    unclaimedLeads: unclaimed.length,
+    timezone:      campaign.timezone,
+    schedule:      campaign.schedule,
+    withinSchedule: isWithinSchedule(campaign),
+  });
 
   // Only dial leads explicitly assigned to this campaign — no unclaimed fallback.
   // The fallback caused multiple campaigns to call the same number simultaneously.
