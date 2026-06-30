@@ -135,6 +135,20 @@ router.post('/:id/pause', (req, res) => {
   res.json({ message: 'Campaign paused', campaign });
 });
 
+// ─── POST /api/campaigns/:id/stop — stop and cancel a campaign ─────────────
+router.post('/:id/stop', (req, res) => {
+  const campaign = campaigns.find(c => c.id === req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+  campaign.status    = 'cancelled';
+  campaign.updatedAt = new Date().toISOString();
+  stopDialler(campaign.id);
+
+  logger.info('Campaign stopped/cancelled', { id: campaign.id });
+  broadcast('campaign_stopped', { campaignId: campaign.id, name: campaign.name });
+  res.json({ message: 'Campaign stopped', campaign });
+});
+
 // ─── GET /api/campaigns/:id/leads — show leads for a campaign ─────────────
 router.get('/:id/leads', (req, res) => {
   const { leadsStore } = require('./leads');
