@@ -136,13 +136,26 @@ router.post('/:id/pause', (req, res) => {
 });
 
 // ─── POST /api/campaigns/:id/stop — stop and cancel a campaign ─────────────
-router.post('/:id/stop', (req, res) => {
+router.post('/:id/stop', async (req, res) => {
   const campaign = campaigns.find(c => c.id === req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+  const state = diallerState[campaign.id];
+  const liveCallSid = state?.activeCallSid;
 
   campaign.status    = 'cancelled';
   campaign.updatedAt = new Date().toISOString();
   stopDialler(campaign.id);
+
+  // Hang up the live call if one is in progress
+  if (liveCallSid) {
+    try {
+      await twilio.endCall(liveCallSid);
+      logger.info('Live call hung up on campaign stop', { sid: liveCallSid });
+    } catch (err) {
+      logger.warn('Could not hang up live call', { sid: liveCallSid, error: err.message });
+    }
+  }
 
   logger.info('Campaign stopped/cancelled', { id: campaign.id });
   broadcast('campaign_stopped', { campaignId: campaign.id, name: campaign.name });
@@ -317,7 +330,10 @@ async function runDialler(campaign) {
         },
       });
       // Track CallSid → lead so status callback can update outcome
-      if (result?.twilioCallSid) callSidToLead[result.twilioCallSid] = lead;
+      if (result?.twilioCallSid) {
+        callSidToLead[result.twilioCallSid] = lead;
+        state.activeCallSid = result.twilioCallSid; // so stop can hang up live call
+      }
       lead.status   = 'called';
       lead.calledAt = new Date().toISOString();
       freshCampaign.reached = (freshCampaign.reached || 0) + 1;
@@ -333,6 +349,7 @@ async function runDialler(campaign) {
       });
     }
 
+    state.activeCallSid = null;
     if (state.running) {
       state.timer = setTimeout(dialNext, DELAY_BETWEEN_CALLS);
     }
