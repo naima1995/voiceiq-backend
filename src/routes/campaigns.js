@@ -141,21 +141,21 @@ router.post('/:id/stop', async (req, res) => {
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
   const state = diallerState[campaign.id];
-  const liveCallSid = state?.activeCallSid;
+  const liveCallSids = [...(state?.activeCallSids || [])];
 
   campaign.status    = 'cancelled';
   campaign.updatedAt = new Date().toISOString();
   stopDialler(campaign.id);
 
-  // Hang up the live call if one is in progress
-  if (liveCallSid) {
+  // Hang up all live calls in the current batch
+  await Promise.allSettled(liveCallSids.map(async sid => {
     try {
-      await twilio.endCall(liveCallSid);
-      logger.info('Live call hung up on campaign stop', { sid: liveCallSid });
+      await twilio.endCall(sid);
+      logger.info('Live call hung up on campaign stop', { sid });
     } catch (err) {
-      logger.warn('Could not hang up live call', { sid: liveCallSid, error: err.message });
+      logger.warn('Could not hang up live call', { sid, error: err.message });
     }
-  }
+  }));
 
   logger.info('Campaign stopped/cancelled', { id: campaign.id });
   broadcast('campaign_stopped', { campaignId: campaign.id, name: campaign.name });
@@ -242,6 +242,10 @@ setInterval(() => {
 
 // ─── Dialler helpers ──────────────────────────────────────────────────────
 
+const BATCH_SIZE      = 20;   // calls launched per batch
+const CALL_STAGGER_MS = 2000; // gap between each call within a batch
+const BATCH_GAP_MS    = 90 * 1000; // gap between batches (90 s)
+
 function stopDialler(campaignId) {
   const state = diallerState[campaignId];
   if (state) {
@@ -250,112 +254,112 @@ function stopDialler(campaignId) {
   }
 }
 
+// Place a single call for one lead; update state in-place.
+async function dialOneLead({ lead, campaign, freshCampaign, state }) {
+  lead.status = 'calling';
+  try {
+    const result = await twilio.makeOutboundCall({
+      toNumber: lead.phone,
+      agentId:  campaign.agentId || 'rachel',
+      leadData: {
+        name:     lead.name,
+        fname:    lead.firstName,
+        lname:    lead.lastName,
+        dob:      lead.age,
+        address:  lead.address,
+        town:     lead.town,
+        country:  lead.country,
+        postcode: lead.postcode,
+        provider: lead.provider,
+        email:    lead.email,
+      },
+    });
+    if (result?.twilioCallSid) {
+      callSidToLead[result.twilioCallSid] = lead;
+      state.activeCallSids.add(result.twilioCallSid);
+    }
+    lead.status   = 'called';
+    lead.calledAt = new Date().toISOString();
+    freshCampaign.reached = (freshCampaign.reached || 0) + 1;
+    logger.info('Call placed', { campaignId: campaign.id, phone: lead.phone, sid: result?.twilioCallSid });
+  } catch (err) {
+    lead.status = 'error';
+    lead.error  = err.message;
+    logger.warn('Call failed', { phone: lead.phone, error: err.message });
+    broadcast('campaign_dial_failed', { campaignId: campaign.id, phone: lead.phone, error: err.message });
+  }
+}
+
 async function runDialler(campaign) {
   const { leadsStore } = require('./leads');
 
-  const DELAY_BETWEEN_CALLS = 8000; // 8 s gap between dials
+  // Guard: prevent duplicate dialler loops for the same campaign
+  if (diallerState[campaign.id]?.running) {
+    logger.warn('Dialler already running — ignoring duplicate start', { id: campaign.id });
+    return;
+  }
 
-  diallerState[campaign.id] = { running: true, timer: null };
+  diallerState[campaign.id] = { running: true, timer: null, activeCallSids: new Set() };
   const state = diallerState[campaign.id];
 
-  // Startup diagnostics — visible in Railway logs
-  const pendingLeads = leadsStore.filter(l => l.campaignId === campaign.id && l.status === 'pending');
-  const allCampaignLeads = leadsStore.filter(l => l.campaignId === campaign.id);
-  const unclaimed = leadsStore.filter(l => !l.campaignId && l.status === 'pending');
+  // Startup diagnostics
+  const pending = leadsStore.filter(l => l.campaignId === campaign.id && l.status === 'pending');
   logger.info('Dialler starting', {
-    campaignId:    campaign.id,
-    name:          campaign.name,
-    agentId:       campaign.agentId,
-    pendingLeads:  pendingLeads.length,
-    totalLeads:    allCampaignLeads.length,
-    unclaimedLeads: unclaimed.length,
-    timezone:      campaign.timezone,
-    schedule:      campaign.schedule,
+    campaignId: campaign.id, name: campaign.name, agentId: campaign.agentId,
+    pendingLeads: pending.length,
+    totalLeads: leadsStore.filter(l => l.campaignId === campaign.id).length,
+    unclaimedLeads: leadsStore.filter(l => !l.campaignId && l.status === 'pending').length,
     withinSchedule: isWithinSchedule(campaign),
   });
 
-  // Only dial leads explicitly assigned to this campaign — no unclaimed fallback.
-  // The fallback caused multiple campaigns to call the same number simultaneously.
-  const getNextLead = () =>
-    leadsStore.find(l => l.campaignId === campaign.id && l.status === 'pending');
+  const getNextBatch = () =>
+    leadsStore
+      .filter(l => l.campaignId === campaign.id && l.status === 'pending')
+      .slice(0, BATCH_SIZE);
 
-  const dialNext = async () => {
+  const dialBatch = async () => {
     if (!state.running) return;
     const freshCampaign = campaigns.find(c => c.id === campaign.id);
     if (!freshCampaign || freshCampaign.status !== 'active') return;
 
-    // Respect per-day calling hours — if outside schedule, wait 5 min and retry
     if (!isWithinSchedule(freshCampaign)) {
-      logger.info('Campaign outside calling hours — waiting', { id: campaign.id });
+      logger.info('Outside calling hours — waiting 5 min', { id: campaign.id });
       broadcast('campaign_waiting', { campaignId: campaign.id, reason: 'outside_hours' });
-      state.timer = setTimeout(dialNext, 5 * 60 * 1000);
+      state.timer = setTimeout(dialBatch, 5 * 60 * 1000);
       return;
     }
 
-    const lead = getNextLead();
-    if (!lead) {
-      if (freshCampaign) {
-        freshCampaign.status    = 'completed';
-        freshCampaign.updatedAt = new Date().toISOString();
-      }
+    const batch = getNextBatch();
+    if (!batch.length) {
+      freshCampaign.status    = 'completed';
+      freshCampaign.updatedAt = new Date().toISOString();
       state.running = false;
-      const reached = freshCampaign?.reached || 0;
-      logger.info('Campaign completed — no more leads', { id: campaign.id, reached });
-      broadcast('campaign_completed', { campaignId: campaign.id, reached });
+      logger.info('Campaign completed', { id: campaign.id, reached: freshCampaign.reached || 0 });
+      broadcast('campaign_completed', { campaignId: campaign.id, reached: freshCampaign.reached || 0 });
       return;
     }
 
-    lead.status = 'calling';
-    broadcast('campaign_dial_attempt', {
-      campaignId: campaign.id,
-      phone: lead.phone,
-      name: lead.name || `${lead.firstName || ''} ${lead.lastName || ''}`.trim(),
-    });
+    logger.info('Dialling batch', { campaignId: campaign.id, batchSize: batch.length });
+    broadcast('campaign_batch_start', { campaignId: campaign.id, count: batch.length, reached: freshCampaign.reached || 0 });
 
-    try {
-      const result = await twilio.makeOutboundCall({
-        toNumber:   lead.phone,
-        agentId:    campaign.agentId || 'rachel',
-        leadData: {
-          name:      lead.name,
-          fname:     lead.firstName,
-          lname:     lead.lastName,
-          dob:       lead.age,
-          address:   lead.address,
-          town:      lead.town,
-          country:   lead.country,
-          postcode:  lead.postcode,
-          provider:  lead.provider,
-          email:     lead.email,
-        },
-      });
-      // Track CallSid → lead so status callback can update outcome
-      if (result?.twilioCallSid) {
-        callSidToLead[result.twilioCallSid] = lead;
-        state.activeCallSid = result.twilioCallSid; // so stop can hang up live call
+    // Launch calls with a stagger to avoid hammering APIs simultaneously
+    for (let i = 0; i < batch.length; i++) {
+      if (!state.running) break;
+      // Fire-and-forget — don't await so all calls in the batch are in-flight
+      dialOneLead({ lead: batch[i], campaign, freshCampaign, state });
+      if (i < batch.length - 1) {
+        await new Promise(r => setTimeout(r, CALL_STAGGER_MS));
       }
-      lead.status   = 'called';
-      lead.calledAt = new Date().toISOString();
-      freshCampaign.reached = (freshCampaign.reached || 0) + 1;
-      logger.info('Campaign dialler: call placed', { campaignId: campaign.id, phone: lead.phone, sid: result?.twilioCallSid });
-    } catch (err) {
-      lead.status = 'error';
-      lead.error  = err.message;
-      logger.warn('Campaign dialler: call failed', { phone: lead.phone, error: err.message });
-      broadcast('campaign_dial_failed', {
-        campaignId: campaign.id,
-        phone: lead.phone,
-        error: err.message,
-      });
     }
 
-    state.activeCallSid = null;
+    // Schedule next batch after the gap
     if (state.running) {
-      state.timer = setTimeout(dialNext, DELAY_BETWEEN_CALLS);
+      logger.info('Batch launched — waiting for next batch', { campaignId: campaign.id, gapMs: BATCH_GAP_MS });
+      state.timer = setTimeout(dialBatch, BATCH_GAP_MS);
     }
   };
 
-  dialNext();
+  dialBatch();
 }
 
 module.exports = router;
