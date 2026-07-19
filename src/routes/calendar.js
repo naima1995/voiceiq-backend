@@ -6,16 +6,13 @@ const configStore = require('../utils/configStore');
 const logger = require('../utils/logger');
 const { requireAdmin } = require('../middleware/auth');
 
-// All calendar management endpoints are admin-only
-router.use(requireAdmin);
-
-// ─── OAuth ────────────────────────────────────────────────────────────────
+// ─── OAuth — no auth guard: these are browser redirects, not API calls ───
 router.get('/oauth/url', (req, res) => {
   const url = calendar.getOAuthUrl();
   res.json({ url });
 });
 
-// ─── OAuth callback — saves token to runtime config store ─────────────────
+// ─── OAuth callback — called by Google redirect, no Bearer token present ──
 router.get('/oauth/callback', async (req, res) => {
   const { code } = req.query;
   try {
@@ -84,6 +81,9 @@ router.get('/oauth/callback', async (req, res) => {
     `);
   }
 });
+
+// ─── Admin-only from here down ────────────────────────────────────────────
+router.use(requireAdmin);
 
 // ─── Connection status ────────────────────────────────────────────────────
 router.get('/status', (req, res) => {

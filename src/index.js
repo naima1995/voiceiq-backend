@@ -84,8 +84,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ─── Admin-only routes ────────────────────────────────────────────────────
-app.get('/api/calendar/oauth/callback', requireAdmin, async (req, res) => {
+// ─── Public routes (no auth) ──────────────────────────────────────────────
+app.get('/api/calendar/oauth/callback', async (req, res) => {
   const calendar = require('./services/calendar');
   const { code } = req.query;
   try {
