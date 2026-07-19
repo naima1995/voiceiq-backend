@@ -4,6 +4,10 @@ const { google } = require('googleapis');
 const calendar = require('../services/calendar');
 const configStore = require('../utils/configStore');
 const logger = require('../utils/logger');
+const { requireAdmin } = require('../middleware/auth');
+
+// All calendar management endpoints are admin-only
+router.use(requireAdmin);
 
 // ─── OAuth ────────────────────────────────────────────────────────────────
 router.get('/oauth/url', (req, res) => {

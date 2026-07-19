@@ -10,7 +10,8 @@ const { createServer } = require('http');
 const logger = require('./utils/logger');
 const { errorHandler } = require('./middleware/errorHandler');
 // apiKeyAuth removed — access controlled by strict CORS origin allowlist
-const rateLimiter = require('./middleware/rateLimiter');
+const rateLimiter      = require('./middleware/rateLimiter');
+const { requireAdmin } = require('./middleware/auth');
 
 // Routes
 const twilioRoutes  = require('./routes/twilio');
@@ -83,8 +84,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ─── Public routes (no auth) ──────────────────────────────────────────────
-app.get('/api/calendar/oauth/callback', async (req, res) => {
+// ─── Admin-only routes ────────────────────────────────────────────────────
+app.get('/api/calendar/oauth/callback', requireAdmin, async (req, res) => {
   const calendar = require('./services/calendar');
   const { code } = req.query;
   try {

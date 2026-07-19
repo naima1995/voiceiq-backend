@@ -84,25 +84,31 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ error: 'Google account email is not verified' });
     }
 
-    // Check allowed emails
-    const allowedRaw  = process.env.ALLOWED_EMAILS || process.env.ADMIN_EMAIL || '';
-    const allowedList = allowedRaw.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    // Resolve role from env vars:
+    //   ALLOWED_EMAILS  (or ADMIN_EMAIL)  → role 'admin'
+    //   MEMBER_EMAILS                     → role 'member'
+    const toList = (raw) => (raw || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+    const adminEmails  = toList(process.env.ALLOWED_EMAILS || process.env.ADMIN_EMAIL);
+    const memberEmails = toList(process.env.MEMBER_EMAILS);
+    const allAllowed   = [...adminEmails, ...memberEmails];
 
-    if (allowedList.length > 0 && !allowedList.includes(email.toLowerCase())) {
+    if (allAllowed.length > 0 && !allAllowed.includes(email.toLowerCase())) {
       logger.warn('Google login rejected — not in allowed list', { email });
       return res.status(403).json({
         error: `Access denied. ${email} is not authorised to access VoiceIQ.`,
       });
     }
 
+    const role = adminEmails.includes(email.toLowerCase()) ? 'admin' : 'member';
+
     const token = jwt.sign(
-      { email, name, picture, role: 'admin', provider: 'google' },
+      { email, name, picture, role, provider: 'google' },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );
 
-    logger.info('Google login successful', { email, ip: req.ip });
-    res.json({ token, user: { email, name, picture, role: 'admin' } });
+    logger.info('Google login successful', { email, role, ip: req.ip });
+    res.json({ token, user: { email, name, picture, role } });
 
   } catch (err) {
     logger.warn('Google token verification failed', { error: err.message });
