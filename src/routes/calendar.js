@@ -135,11 +135,18 @@ router.delete('/cancel/:eventId', async (req, res) => {
 
 // ─── List upcoming events ─────────────────────────────────────────────────
 router.get('/events', async (req, res) => {
-  const events = await calendar.listUpcomingEvents({
-    maxResults: req.query.maxResults ? parseInt(req.query.maxResults) : 20,
-    daysAhead: req.query.daysAhead ? parseInt(req.query.daysAhead) : 14,
-  });
-  res.json({ events });
+  const config = configStore.getCalendarConfig();
+  if (!config?.connected) return res.json({ events: [], connected: false });
+  try {
+    const events = await calendar.listUpcomingEvents({
+      maxResults: req.query.maxResults ? parseInt(req.query.maxResults) : 20,
+      daysAhead:  req.query.daysAhead  ? parseInt(req.query.daysAhead)  : 14,
+    });
+    res.json({ events, connected: true });
+  } catch (err) {
+    logger.warn('Calendar events fetch failed', { error: err.message });
+    res.json({ events: [], connected: false, error: err.message });
+  }
 });
 
 module.exports = router;
